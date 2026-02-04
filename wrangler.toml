@@ -1,0 +1,3 @@
+main = "src/index.ts"
+name = "couponpies-api"
+compatibility_date = "2025-06-01"

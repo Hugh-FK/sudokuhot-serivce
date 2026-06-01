@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.5.0",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy --env production",
     "db:migrate:local": "wrangler d1 migrations apply sudokuhot-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply sudokuhot-db --remote",
     "db:studio": "drizzle-kit studio"

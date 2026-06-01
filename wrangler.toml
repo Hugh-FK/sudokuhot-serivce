@@ -7,7 +7,8 @@ APP_NAME = "Sudoku Hot API"
 APP_VERSION = "1.0.0"
 API_PUBLIC_URL = "http://127.0.0.1:8787"
 FRONTEND_URL = "http://localhost:4321"
-ALLOWED_ORIGINS = "http://localhost:4321,http://127.0.0.1:4321,http://localhost:8787,http://127.0.0.1:8787"
+# 含 www / 裸域、http / https（与浏览器 Origin 须完全一致）
+ALLOWED_ORIGINS = "http://localhost:4321,http://127.0.0.1:4321,http://localhost:8787,http://127.0.0.1:8787,https://sudokuhot.com,https://www.sudokuhot.com,http://sudokuhot.com,http://www.sudokuhot.com"
 
 [[d1_databases]]
 binding = "DB"
@@ -17,7 +18,12 @@ migrations_dir = "migrations"
 
 [env.production]
 name = "sudokuhot-api-production"
-vars = { APP_ENV = "production" }
+vars = {
+  APP_ENV = "production",
+  API_PUBLIC_URL = "https://api.sudokuhot.com",
+  FRONTEND_URL = "https://www.sudokuhot.com",
+  ALLOWED_ORIGINS = "https://sudokuhot.com,https://www.sudokuhot.com,http://sudokuhot.com,http://www.sudokuhot.com",
+}
 
 [env.staging]
 name = "sudokuhot-api-staging"

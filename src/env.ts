@@ -2,11 +2,16 @@
  * 环境变量类型定义
  * Cloudflare Workers 环境变量通过 Env 接口定义
  */
+import type { D1Database } from '@cloudflare/workers-types';
+
 export interface Env {
   // 应用基础配置
   APP_ENV?: string
   APP_NAME?: string
   APP_VERSION?: string
+
+  /** Cloudflare D1 */
+  DB?: D1Database
 
   // 数据库配置
   DATABASE_URL?: string
@@ -15,6 +20,15 @@ export interface Env {
   JWT_SECRET?: string
   JWT_EXPIRES_IN?: string
   API_SECRET_KEY?: string
+
+  /** 对外可访问的 API 根地址（无尾斜杠），用于拼 OAuth 回调 */
+  API_PUBLIC_URL?: string
+  /** Google OAuth（与 Google 控制台完全一致；不设则用 API_PUBLIC_URL + /v1/auth/callback） */
+  GOOGLE_CLIENT_ID?: string
+  GOOGLE_CLIENT_SECRET?: string
+  GOOGLE_OAUTH_REDIRECT_URI?: string
+  /** 登录成功后携带 token 跳回的前端根地址，默认取 ALLOWED_ORIGINS 第一项 */
+  FRONTEND_URL?: string
 
   // CORS 配置
   ALLOWED_ORIGINS?: string

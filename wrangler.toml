@@ -1,18 +1,24 @@
 main = "src/index.ts"
-name = "couponpies-api"
+name = "sudokuhot-api"
 compatibility_date = "2025-06-01"
 
-# 公共环境变量（非敏感信息）
 [vars]
-APP_NAME = "CouponPies API"
+APP_NAME = "Sudoku Hot API"
 APP_VERSION = "1.0.0"
+API_PUBLIC_URL = "http://127.0.0.1:8787"
+FRONTEND_URL = "http://localhost:4321"
+ALLOWED_ORIGINS = "http://localhost:4321,http://127.0.0.1:4321,http://localhost:8787,http://127.0.0.1:8787"
 
-# 生产环境配置
+[[d1_databases]]
+binding = "DB"
+database_name = "sudokuhot-db"
+database_id = "local-dev-placeholder"
+migrations_dir = "migrations"
+
 [env.production]
-name = "couponpies-api-production"
+name = "sudokuhot-api-production"
 vars = { APP_ENV = "production" }
 
-# 预发布环境配置
 [env.staging]
-name = "couponpies-api-staging"
+name = "sudokuhot-api-staging"
 vars = { APP_ENV = "staging" }

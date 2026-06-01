@@ -28,3 +28,7 @@ ALLOWED_ORIGINS = "https://sudokuhot.com,https://www.sudokuhot.com,http://sudoku
 [env.staging]
 name = "sudokuhot-api-staging"
 vars = { APP_ENV = "staging" }
+
+[observability.logs]
+enabled = false
+invocation_logs = true

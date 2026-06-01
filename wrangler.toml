@@ -18,12 +18,12 @@ migrations_dir = "migrations"
 
 [env.production]
 name = "sudokuhot-api-production"
-vars = {
-  APP_ENV = "production",
-  API_PUBLIC_URL = "https://api.sudokuhot.com",
-  FRONTEND_URL = "https://www.sudokuhot.com",
-  ALLOWED_ORIGINS = "https://sudokuhot.com,https://www.sudokuhot.com,http://sudokuhot.com,http://www.sudokuhot.com",
-}
+
+[env.production.vars]
+APP_ENV = "production"
+API_PUBLIC_URL = "https://api.sudokuhot.com"
+FRONTEND_URL = "https://www.sudokuhot.com"
+ALLOWED_ORIGINS = "https://sudokuhot.com,https://www.sudokuhot.com,http://sudokuhot.com,http://www.sudokuhot.com"
 
 [env.staging]
 name = "sudokuhot-api-staging"

@@ -4618,10 +4618,10 @@ var require_dist = __commonJS({
   }
 });
 
-// .wrangler/tmp/bundle-cewxLX/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-ZfZz2m/middleware-loader.entry.ts
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-cewxLX/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-ZfZz2m/middleware-insertion-facade.js
 init_modules_watch_stub();
 
 // src/index.ts
@@ -35278,6 +35278,10 @@ async function insertFeedback(db, input) {
   return id;
 }
 __name(insertFeedback, "insertFeedback");
+async function listFeedbackForUser(db, userId, limit = 20) {
+  return db.select().from(feedbackEntries).where(eq(feedbackEntries.userId, userId)).orderBy(desc(feedbackEntries.createdAt)).limit(limit);
+}
+__name(listFeedbackForUser, "listFeedbackForUser");
 async function listBookmarks(db, userId) {
   const rows = await db.select({ slug: blogBookmarks.slug }).from(blogBookmarks).where(eq(blogBookmarks.userId, userId)).orderBy(desc(blogBookmarks.createdAt));
   return rows.map((r) => r.slug);
@@ -35444,14 +35448,14 @@ function buildDerivedStats(completions, daily, period, reference = /* @__PURE__ 
   if (!hasLive) {
     return {
       useLiveData: false,
-      totalGames: "482",
-      winRate: 94.2,
-      avgTime: "06:42",
-      bestTime: "03:15",
-      bestTimeDifficulty: "expert",
-      accuracy: "98.4%",
-      streakDays: 14,
-      weeklyDone: 5,
+      totalGames: "0",
+      winRate: 0,
+      avgTime: "00:00",
+      bestTime: "\u2014",
+      bestTimeDifficulty: "medium",
+      accuracy: "\u2014",
+      streakDays: 0,
+      weeklyDone: 0,
       weeklyTotal: 7
     };
   }
@@ -35467,8 +35471,6 @@ function buildDerivedStats(completions, daily, period, reference = /* @__PURE__ 
       (c) => c.result === "win" && c.mistakes === 0
     ).length;
     accuracy = `${Math.round(flawless / finished.length * 1e3) / 10}%`;
-  } else if (period === "30d") {
-    accuracy = "98.4%";
   }
   const bestSeconds = usePeriod ? periodSummary.bestWinSeconds : global.bestWinSeconds;
   const bestDiff = usePeriod ? periodSummary.bestWinDifficulty : global.bestWinDifficulty;
@@ -35477,8 +35479,8 @@ function buildDerivedStats(completions, daily, period, reference = /* @__PURE__ 
     totalGames: String(totalGames),
     winRate,
     avgTime: formatTime(avgSeconds),
-    bestTime: bestSeconds !== null ? formatTime(bestSeconds) : "03:15",
-    bestTimeDifficulty: bestDiff ?? "expert",
+    bestTime: bestSeconds !== null ? formatTime(bestSeconds) : "\u2014",
+    bestTimeDifficulty: bestDiff ?? "medium",
     accuracy,
     streakDays: global.dailyStreak,
     weeklyDone: Math.min(global.dailyStreak, 7),
@@ -35549,14 +35551,6 @@ init_modules_watch_stub();
 
 // src/lib/achievement-catalog.ts
 init_modules_watch_stub();
-var ACHIEVEMENT_HALL_SUMMARY = {
-  unlocked: 12,
-  total: 40,
-  progressPercent: 30,
-  gold: 3,
-  silver: 5,
-  bronze: 4
-};
 var ACHIEVEMENT_RECENT = [
   { achievementId: "masterOfLogic", icon: "stars", iconTone: "yellow", timeKey: "hours2" },
   { achievementId: "speedDemon", icon: "timer", iconTone: "blue", timeKey: "yesterday" },
@@ -35720,20 +35714,21 @@ function buildAchievementHallView(completions, daily) {
   const summary = buildSummary(completions, daily);
   const hasLive = summary.totalGames > 0;
   if (!hasLive) {
+    const categories2 = ACHIEVEMENT_CATEGORIES.map((c) => ({
+      id: c.id,
+      achievements: c.achievements.map((a) => ({
+        ...a,
+        unlocked: false,
+        lockOnly: true,
+        progress: void 0
+      }))
+    }));
+    const total2 = categories2.reduce((n, c) => n + c.achievements.length, 0);
     return {
       useLiveData: false,
-      summary: { ...ACHIEVEMENT_HALL_SUMMARY },
-      recent: ACHIEVEMENT_RECENT.map((r) => ({
-        achievementId: r.achievementId,
-        icon: r.icon,
-        iconTone: r.iconTone,
-        completedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        timeKey: r.timeKey
-      })),
-      categories: ACHIEVEMENT_CATEGORIES.map((c) => ({
-        id: c.id,
-        achievements: c.achievements.map((a) => ({ ...a }))
-      }))
+      summary: { unlocked: 0, total: total2, progressPercent: 0, gold: 0, silver: 0, bronze: 0 },
+      recent: [],
+      categories: categories2
     };
   }
   const wins = completions.filter((c) => c.result === "win");
@@ -35771,9 +35766,22 @@ function buildStatsAchievementUnlocks(completions, daily) {
   const summary = buildSummary(completions, daily);
   const wins = completions.filter((c) => c.result === "win");
   const hasLive = summary.totalGames > 0;
+  if (!hasLive) {
+    return {
+      useLiveData: false,
+      unlocked: {
+        grandMaster: false,
+        speedDemon: false,
+        monthlyHero: false,
+        zenWarrior: false,
+        collector: false,
+        deepThinker: false
+      }
+    };
+  }
   const evaluateId = /* @__PURE__ */ __name((id) => evaluate(id, wins, summary).unlocked, "evaluateId");
   return {
-    useLiveData: hasLive,
+    useLiveData: true,
     unlocked: {
       grandMaster: summary.wins >= 10,
       speedDemon: wins.some((c) => c.elapsedSeconds <= 180) || evaluateId("speedDemon"),
@@ -35821,6 +35829,26 @@ __name(buildHellModeProgress, "buildHellModeProgress");
 
 // src/services/activity.ts
 init_modules_watch_stub();
+var ALL_ACTIVITY_KINDS = ["games", "achievements", "daily"];
+function parseActivityQuery(query) {
+  const parsedTypes = (query.types ?? "").split(",").map((t2) => t2.trim()).filter(
+    (t2) => ALL_ACTIVITY_KINDS.includes(t2)
+  );
+  const rangeRaw = query.range ?? "30d";
+  const range = ["7d", "30d", "month", "year"].includes(rangeRaw) ? rangeRaw : "30d";
+  return {
+    types: parsedTypes.length > 0 ? parsedTypes : [...ALL_ACTIVITY_KINDS],
+    range
+  };
+}
+__name(parseActivityQuery, "parseActivityQuery");
+function filterActivityEntries(entries, types, range, reference = /* @__PURE__ */ new Date()) {
+  return entries.filter((e) => {
+    if (!types.includes(e.kind)) return false;
+    return isWithinPeriod(e.dateKey, range, reference);
+  });
+}
+__name(filterActivityEntries, "filterActivityEntries");
 var DIFF_LABEL = {
   easy: { en: "Easy", zh: "\u7B80\u5355" },
   medium: { en: "Medium", zh: "\u4E2D\u7B49" },
@@ -36546,11 +36574,33 @@ function createV1Routes(d1, cfEnv) {
   }).get("/users/me/activity", async ({ query, request }) => {
     const user = await requireUser(request.headers.get("authorization") ?? void 0);
     const locale = query.locale === "zh" ? "zh" : "en";
+    const { types, range } = parseActivityQuery(query);
     const completions = await listCompletions(db, user.id);
     const daily = await listDailyCompletions(db, user.id);
+    const allEntries = buildActivityFeed(completions, daily, locale);
+    const entries = filterActivityEntries(allEntries, types, range);
+    const filteredCompletions = types.includes("games") ? completions.filter((c) => isWithinPeriod(c.completedAt, range)) : [];
+    const filteredDaily = types.includes("daily") ? daily.filter((d) => isWithinPeriod(d.dateKey, range)) : [];
     return {
-      summary: buildActivitySummary(completions, daily, locale),
-      entries: buildActivityFeed(completions, daily, locale)
+      summary: buildActivitySummary(
+        types.includes("games") ? filteredCompletions : [],
+        types.includes("daily") ? filteredDaily : [],
+        locale
+      ),
+      entries
+    };
+  }).get("/users/me/feedback", async ({ request }) => {
+    const user = await requireUser(request.headers.get("authorization") ?? void 0);
+    const rows = await listFeedbackForUser(db, user.id);
+    return {
+      entries: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        subject: r.subject,
+        message: r.message,
+        createdAt: r.createdAt
+      }))
     };
   }).get("/users/me/rank", async ({ query, request }) => {
     const user = await requireUser(request.headers.get("authorization") ?? void 0);
@@ -36691,7 +36741,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env4, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-cewxLX/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-ZfZz2m/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -36724,7 +36774,7 @@ function __facade_invoke__(request, env4, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-cewxLX/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-ZfZz2m/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

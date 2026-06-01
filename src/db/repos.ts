@@ -319,6 +319,15 @@ export async function insertFeedback(
   return id;
 }
 
+export async function listFeedbackForUser(db: AppDb, userId: string, limit = 20) {
+  return db
+    .select()
+    .from(feedbackEntries)
+    .where(eq(feedbackEntries.userId, userId))
+    .orderBy(desc(feedbackEntries.createdAt))
+    .limit(limit);
+}
+
 export async function listBookmarks(db: AppDb, userId: string) {
   const rows = await db
     .select({ slug: blogBookmarks.slug })

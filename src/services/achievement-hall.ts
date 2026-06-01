@@ -171,20 +171,21 @@ export function buildAchievementHallView(
   const hasLive = summary.totalGames > 0;
 
   if (!hasLive) {
+    const categories = ACHIEVEMENT_CATEGORIES.map((c) => ({
+      id: c.id,
+      achievements: c.achievements.map((a) => ({
+        ...a,
+        unlocked: false,
+        lockOnly: true,
+        progress: undefined,
+      })),
+    }));
+    const total = categories.reduce((n, c) => n + c.achievements.length, 0);
     return {
       useLiveData: false,
-      summary: { ...ACHIEVEMENT_HALL_SUMMARY },
-      recent: ACHIEVEMENT_RECENT.map((r) => ({
-        achievementId: r.achievementId,
-        icon: r.icon,
-        iconTone: r.iconTone,
-        completedAt: new Date().toISOString(),
-        timeKey: r.timeKey,
-      })),
-      categories: ACHIEVEMENT_CATEGORIES.map((c) => ({
-        id: c.id,
-        achievements: c.achievements.map((a) => ({ ...a })),
-      })),
+      summary: { unlocked: 0, total, progressPercent: 0, gold: 0, silver: 0, bronze: 0 },
+      recent: [],
+      categories,
     };
   }
 
@@ -233,11 +234,24 @@ export function buildStatsAchievementUnlocks(
   const summary = buildSummary(completions, daily);
   const wins = completions.filter((c) => c.result === 'win');
   const hasLive = summary.totalGames > 0;
+  if (!hasLive) {
+    return {
+      useLiveData: false,
+      unlocked: {
+        grandMaster: false,
+        speedDemon: false,
+        monthlyHero: false,
+        zenWarrior: false,
+        collector: false,
+        deepThinker: false,
+      },
+    };
+  }
 
   const evaluateId = (id: AchievementHallId) => evaluate(id, wins, summary).unlocked;
 
   return {
-    useLiveData: hasLive,
+    useLiveData: true,
     unlocked: {
       grandMaster: summary.wins >= 10,
       speedDemon: wins.some((c) => c.elapsedSeconds <= 180) || evaluateId('speedDemon'),

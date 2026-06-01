@@ -1,6 +1,45 @@
 import type { gameCompletions, userDailyCompletions } from '../db/schema';
-import { buildSummary, formatTime } from './aggregates';
+import { buildSummary, formatTime, isWithinPeriod, type StatsPeriod } from './aggregates';
 import { computeStreak } from '../lib/daily-catalog';
+
+export type ActivityFeedKind = 'games' | 'achievements' | 'daily';
+export type ActivityRange = StatsPeriod;
+
+const ALL_ACTIVITY_KINDS: ActivityFeedKind[] = ['games', 'achievements', 'daily'];
+
+export function parseActivityQuery(query: {
+  types?: string;
+  range?: string;
+}): { types: ActivityFeedKind[]; range: ActivityRange } {
+  const parsedTypes = (query.types ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t): t is ActivityFeedKind =>
+      ALL_ACTIVITY_KINDS.includes(t as ActivityFeedKind),
+    );
+  const rangeRaw = query.range ?? '30d';
+  const range: ActivityRange = ['7d', '30d', 'month', 'year'].includes(rangeRaw)
+    ? (rangeRaw as ActivityRange)
+    : '30d';
+  return {
+    types: parsedTypes.length > 0 ? parsedTypes : [...ALL_ACTIVITY_KINDS],
+    range,
+  };
+}
+
+type ActivityEntry = ReturnType<typeof buildActivityFeed>[number];
+
+export function filterActivityEntries(
+  entries: ActivityEntry[],
+  types: ActivityFeedKind[],
+  range: ActivityRange,
+  reference = new Date(),
+): ActivityEntry[] {
+  return entries.filter((e) => {
+    if (!types.includes(e.kind)) return false;
+    return isWithinPeriod(e.dateKey, range, reference);
+  });
+}
 
 type CompletionRow = typeof gameCompletions.$inferSelect;
 type DailyRow = typeof userDailyCompletions.$inferSelect;

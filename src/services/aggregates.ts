@@ -100,14 +100,14 @@ export function buildDerivedStats(
   if (!hasLive) {
     return {
       useLiveData: false,
-      totalGames: '482',
-      winRate: 94.2,
-      avgTime: '06:42',
-      bestTime: '03:15',
-      bestTimeDifficulty: 'expert',
-      accuracy: '98.4%',
-      streakDays: 14,
-      weeklyDone: 5,
+      totalGames: '0',
+      winRate: 0,
+      avgTime: '00:00',
+      bestTime: '—',
+      bestTimeDifficulty: 'medium',
+      accuracy: '—',
+      streakDays: 0,
+      weeklyDone: 0,
       weeklyTotal: 7,
     };
   }
@@ -127,8 +127,6 @@ export function buildDerivedStats(
       (c) => c.result === 'win' && c.mistakes === 0,
     ).length;
     accuracy = `${Math.round((flawless / finished.length) * 1000) / 10}%`;
-  } else if (period === '30d') {
-    accuracy = '98.4%';
   }
 
   const bestSeconds = usePeriod ? periodSummary.bestWinSeconds : global.bestWinSeconds;
@@ -139,8 +137,8 @@ export function buildDerivedStats(
     totalGames: String(totalGames),
     winRate,
     avgTime: formatTime(avgSeconds),
-    bestTime: bestSeconds !== null ? formatTime(bestSeconds) : '03:15',
-    bestTimeDifficulty: bestDiff ?? 'expert',
+    bestTime: bestSeconds !== null ? formatTime(bestSeconds) : '—',
+    bestTimeDifficulty: bestDiff ?? 'medium',
     accuracy,
     streakDays: global.dailyStreak,
     weeklyDone: Math.min(global.dailyStreak, 7),

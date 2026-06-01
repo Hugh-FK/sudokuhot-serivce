@@ -18,6 +18,7 @@ import {
   insertCompletion,
   insertFeedback,
   listBookmarks,
+  listFeedbackForUser,
   listCommunityStats,
   listCompletions,
   listDailyCompletions,
@@ -35,10 +36,16 @@ import {
   buildDifficultyChart,
   buildSummary,
   getProfileRankLabel,
+  isWithinPeriod,
   type StatsPeriod,
 } from '../services/aggregates';
 import { buildAchievementHallView, buildStatsAchievementUnlocks, buildHellModeProgress, buildProfileMilestone } from '../services/achievement-hall';
-import { buildActivityFeed, buildActivitySummary } from '../services/activity';
+import {
+  buildActivityFeed,
+  buildActivitySummary,
+  filterActivityEntries,
+  parseActivityQuery,
+} from '../services/activity';
 import { redirectTo } from '../lib/redirect';
 import { createOAuthState, verifyOAuthState } from '../lib/oauth-state';
 import {
@@ -516,11 +523,40 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
     .get('/users/me/activity', async ({ query, request }) => {
       const user = await requireUser(request.headers.get('authorization') ?? undefined);
       const locale = query.locale === 'zh' ? 'zh' : 'en';
+      const { types, range } = parseActivityQuery(query);
       const completions = await listCompletions(db, user.id);
       const daily = await listDailyCompletions(db, user.id);
+      const allEntries = buildActivityFeed(completions, daily, locale);
+      const entries = filterActivityEntries(allEntries, types, range);
+      const filteredCompletions =
+        types.includes('games')
+          ? completions.filter((c) => isWithinPeriod(c.completedAt, range))
+          : [];
+      const filteredDaily =
+        types.includes('daily')
+          ? daily.filter((d) => isWithinPeriod(d.dateKey, range))
+          : [];
       return {
-        summary: buildActivitySummary(completions, daily, locale),
-        entries: buildActivityFeed(completions, daily, locale),
+        summary: buildActivitySummary(
+          types.includes('games') ? filteredCompletions : [],
+          types.includes('daily') ? filteredDaily : [],
+          locale,
+        ),
+        entries,
+      };
+    })
+    .get('/users/me/feedback', async ({ request }) => {
+      const user = await requireUser(request.headers.get('authorization') ?? undefined);
+      const rows = await listFeedbackForUser(db, user.id);
+      return {
+        entries: rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          email: r.email,
+          subject: r.subject,
+          message: r.message,
+          createdAt: r.createdAt,
+        })),
       };
     })
     .get('/users/me/rank', async ({ query, request }) => {

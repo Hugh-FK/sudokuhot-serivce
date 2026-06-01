@@ -12,7 +12,7 @@ ALLOWED_ORIGINS = "http://localhost:4321,http://127.0.0.1:4321,http://localhost:
 [[d1_databases]]
 binding = "DB"
 database_name = "sudokuhot-db"
-database_id = "local-dev-placeholder"
+database_id = "0caef6ee-6b1f-47bf-918a-e723b3baf68e"
 migrations_dir = "migrations"
 
 [env.production]

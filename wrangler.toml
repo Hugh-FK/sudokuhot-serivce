@@ -1,5 +1,5 @@
 main = "src/index.ts"
-name = "sudokuhot-api"
+name = 'sudokuhot-serivce'
 compatibility_date = "2025-06-01"
 
 [vars]

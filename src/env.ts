@@ -33,6 +33,9 @@ export interface Env {
   // CORS 配置
   ALLOWED_ORIGINS?: string
 
+  /** 逗号分隔，可查看全部留言列表的管理员邮箱 */
+  FEEDBACK_ADMIN_EMAILS?: string
+
   // 第三方服务 - Stripe
   STRIPE_SECRET_KEY?: string
   STRIPE_PUBLISHABLE_KEY?: string

@@ -329,6 +329,21 @@ export async function listFeedbackForUser(db: AppDb, userId: string, limit = 20)
     .limit(limit);
 }
 
+/** 全部用户留言（管理员），按创建时间倒序 + offset 分页 */
+export async function listAllFeedback(
+  db: AppDb,
+  input: { limit: number; cursor?: number },
+) {
+  const limit = Math.min(100, Math.max(1, input.limit));
+  const offset = Math.max(0, input.cursor ?? 0);
+  return db
+    .select()
+    .from(feedbackEntries)
+    .orderBy(desc(feedbackEntries.createdAt))
+    .limit(limit + 1)
+    .offset(offset);
+}
+
 export async function listBookmarks(db: AppDb, userId: string) {
   const rows = await db
     .select({ slug: blogBookmarks.slug })

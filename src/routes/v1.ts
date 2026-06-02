@@ -17,6 +17,7 @@ import {
   getUserById,
   insertCompletion,
   insertFeedback,
+  listAllFeedback,
   listLeaderboardSpeed,
   listLeaderboardStreak,
   listLeaderboardWins,
@@ -126,11 +127,34 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
     return user;
   }
 
+  function parseFeedbackAdminEmails(): Set<string> {
+    const raw = cfEnv.FEEDBACK_ADMIN_EMAILS?.trim() || 'fgwenzk@gmail.com';
+    return new Set(
+      raw
+        .split(',')
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }
+
+  async function requireFeedbackAdmin(authorization: string | undefined) {
+    const user = await requireUser(authorization);
+    const email = user.email?.trim().toLowerCase() ?? '';
+    if (!email || !parseFeedbackAdminEmails().has(email)) {
+      throw new Error('FORBIDDEN');
+    }
+    return user;
+  }
+
   return new Elysia({ prefix: '/v1' })
     .onError(({ error, set }) => {
       if (error instanceof Error && error.message === 'UNAUTHORIZED') {
         set.status = 401;
         return { error: 'unauthorized' };
+      }
+      if (error instanceof Error && error.message === 'FORBIDDEN') {
+        set.status = 403;
+        return { error: 'forbidden' };
       }
       if (error instanceof Error && error.message === 'GOOGLE_OAUTH_NOT_CONFIGURED') {
         set.status = 503;
@@ -629,6 +653,35 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
         })),
       };
     })
+    .get(
+      '/feedback/entries',
+      async ({ query, request }) => {
+        await requireFeedbackAdmin(request.headers.get('authorization') ?? undefined);
+        const limit = Math.min(100, Math.max(1, Number(query.limit ?? 20) || 20));
+        const cursor = Math.max(0, Number(query.cursor ?? 0) || 0);
+        const rows = await listAllFeedback(db, { limit, cursor });
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        return {
+          entries: page.map((r) => ({
+            id: r.id,
+            userId: r.userId,
+            name: r.name,
+            email: r.email,
+            subject: r.subject,
+            message: r.message,
+            createdAt: r.createdAt,
+          })),
+          nextCursor: hasMore ? String(cursor + limit) : null,
+        };
+      },
+      {
+        query: t.Object({
+          limit: t.Optional(t.String()),
+          cursor: t.Optional(t.String()),
+        }),
+      },
+    )
     .get('/users/me/rank', async ({ query, request }) => {
       const user = await requireUser(request.headers.get('authorization') ?? undefined);
       const locale = query.locale === 'zh' ? 'zh' : 'en';

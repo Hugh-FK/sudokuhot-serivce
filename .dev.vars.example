@@ -1,11 +1,17 @@
-# 复制为 .dev.vars（勿提交 git），然后 wrangler dev 重启
-# https://console.cloud.google.com/apis/credentials → OAuth 2.0 客户端 ID（Web）
+# 复制为 .dev.vars（已在 .gitignore，勿提交）
+# wrangler dev 会加载并覆盖 wrangler.toml 的 [vars]
 
+APP_ENV=development
+
+API_PUBLIC_URL=http://127.0.0.1:8787
+FRONTEND_URL=http://localhost:4321
+ALLOWED_ORIGINS=http://localhost:4321,http://127.0.0.1:4321,http://localhost:8787,http://127.0.0.1:8787
+
+# Google OAuth：https://console.cloud.google.com/apis/credentials
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
-
-# 用于 OAuth state 签名（任意长随机字符串）
-API_SECRET_KEY=change-me-to-a-long-random-string
-
-# 可选：不填则用 wrangler.toml 的 API_PUBLIC_URL + /v1/auth/callback
+# 可选；不设则用 API_PUBLIC_URL + /v1/auth/callback
 # GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8787/v1/auth/callback
+
+# OAuth state 签名（任意长随机串）
+API_SECRET_KEY=change-me-to-a-long-random-string

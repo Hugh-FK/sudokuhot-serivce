@@ -1,33 +1,21 @@
 main = "src/index.ts"
-name = 'sudokuhot-serivce'
+name = "sudokuhot-serivce"
 compatibility_date = "2025-06-01"
 
+# 线上变量（deploy 生效）。本地 wrangler dev 由 .dev.vars 覆盖
 [vars]
+APP_ENV = "production"
 APP_NAME = "Sudoku Hot API"
 APP_VERSION = "1.0.0"
-API_PUBLIC_URL = "http://127.0.0.1:8787"
-FRONTEND_URL = "http://localhost:4321"
-# 含 www / 裸域、http / https（与浏览器 Origin 须完全一致）
-ALLOWED_ORIGINS = "http://localhost:4321,http://127.0.0.1:4321,http://localhost:8787,http://127.0.0.1:8787,https://sudokuhot.com,https://www.sudokuhot.com,http://sudokuhot.com,http://www.sudokuhot.com"
+API_PUBLIC_URL = "https://api.sudokuhot.com"
+FRONTEND_URL = "https://www.sudokuhot.com"
+ALLOWED_ORIGINS = "https://sudokuhot.com,https://www.sudokuhot.com,http://sudokuhot.com,http://www.sudokuhot.com"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "sudokuhot-db"
 database_id = "0caef6ee-6b1f-47bf-918a-e723b3baf68e"
 migrations_dir = "migrations"
-
-[env.production]
-name = "sudokuhot-api-production"
-
-[env.production.vars]
-APP_ENV = "production"
-API_PUBLIC_URL = "https://api.sudokuhot.com"
-FRONTEND_URL = "https://www.sudokuhot.com"
-ALLOWED_ORIGINS = "https://sudokuhot.com,https://www.sudokuhot.com,http://sudokuhot.com,http://www.sudokuhot.com"
-
-[env.staging]
-name = "sudokuhot-api-staging"
-vars = { APP_ENV = "staging" }
 
 [observability.logs]
 enabled = false

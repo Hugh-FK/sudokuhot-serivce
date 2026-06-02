@@ -17,6 +17,9 @@ import {
   getUserById,
   insertCompletion,
   insertFeedback,
+  listLeaderboardSpeed,
+  listLeaderboardStreak,
+  listLeaderboardWins,
   listBookmarks,
   listFeedbackForUser,
   listCommunityStats,
@@ -289,6 +292,73 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
           provider: t.Union([t.Literal('google'), t.Literal('email')]),
           email: t.Optional(t.String()),
           displayName: t.Optional(t.String()),
+        }),
+      },
+    )
+    .get(
+      '/leaderboards',
+      async ({ query, set }) => {
+        const type = query.type as 'wins' | 'streak' | 'speed';
+        const period = (query.period ?? 'all') as 'all' | '30d' | '7d';
+        const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50)));
+        const cursor = Math.max(0, Number(query.cursor ?? 0) || 0);
+        const modeRaw = query.mode;
+        const difficultyIdRaw = query.difficultyId;
+
+        if (type !== 'wins' && type !== 'streak' && type !== 'speed') {
+          set.status = 400;
+          return { error: 'invalid_type' };
+        }
+        if (period !== 'all' && period !== '30d' && period !== '7d') {
+          set.status = 400;
+          return { error: 'invalid_period' };
+        }
+
+        const mode =
+          modeRaw === 'classic' || modeRaw === 'hell'
+            ? (modeRaw as 'classic' | 'hell')
+            : type === 'streak'
+              ? undefined
+              : ('hell' as const);
+        const difficultyId =
+          difficultyIdRaw &&
+          ['easy', 'medium', 'hard', 'expert', 'master'].includes(difficultyIdRaw)
+            ? difficultyIdRaw
+            : type === 'streak'
+              ? undefined
+              : ('master' as const);
+
+        const pageSize = limit + 1;
+        const rows =
+          type === 'wins'
+            ? await listLeaderboardWins(db, { period, limit: pageSize, cursor, mode, difficultyId })
+            : type === 'speed'
+              ? await listLeaderboardSpeed(db, { period, limit: pageSize, cursor, mode, difficultyId })
+              : await listLeaderboardStreak(db, { period, limit: pageSize, cursor });
+
+        const visible = rows.filter((r) => r.value > 0);
+        const hasMore = visible.length > limit;
+        const slice = visible.slice(0, limit);
+        return {
+          entries: slice.map((r, idx) => ({
+            rank: idx + 1 + cursor,
+            userId: r.userId,
+            displayName: r.displayName,
+            avatarUrl: r.avatarUrl,
+            value: r.value,
+            updatedAt: r.updatedAt,
+          })),
+          nextCursor: hasMore ? String(cursor + limit) : null,
+        };
+      },
+      {
+        query: t.Object({
+          type: t.String(),
+          period: t.Optional(t.String()),
+          limit: t.Optional(t.Union([t.String(), t.Number()])),
+          cursor: t.Optional(t.String()),
+          mode: t.Optional(t.String()),
+          difficultyId: t.Optional(t.String()),
         }),
       },
     )

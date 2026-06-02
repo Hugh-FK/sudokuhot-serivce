@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import type { AppDb } from './index';
 import {
   authSessions,
@@ -13,6 +13,7 @@ import {
   userSettings,
 } from './schema';
 import { addDaysIso, hashToken, isoNow, newId, newToken } from '../lib/crypto';
+import { computeStreak } from '../lib/daily-catalog';
 
 export type { AppDb };
 
@@ -352,6 +353,189 @@ export async function removeBookmark(db: AppDb, userId: string, slug: string) {
 
 export async function listCommunityStats(db: AppDb) {
   return db.select().from(difficultyCommunityStats);
+}
+
+export type LeaderboardType = 'wins' | 'streak' | 'speed';
+export type LeaderboardPeriod = 'all' | '30d' | '7d';
+
+export type LeaderboardEntryRow = {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  value: number;
+  updatedAt?: string;
+};
+
+function computeFromDate(period: LeaderboardPeriod): string | null {
+  if (period === 'all') return null;
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const days = period === '7d' ? 6 : 29;
+  now.setDate(now.getDate() - days);
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export async function listLeaderboardWins(
+  db: AppDb,
+  input: {
+    period: LeaderboardPeriod;
+    limit: number;
+    cursor?: number;
+    mode?: 'classic' | 'hell';
+    difficultyId?: string;
+  },
+): Promise<LeaderboardEntryRow[]> {
+  const fromDate = computeFromDate(input.period);
+  const isFiltered = Boolean(input.mode || input.difficultyId);
+  const offset = Math.max(0, input.cursor ?? 0);
+
+  const winFilters: unknown[] = [sql`result = 'win'`];
+  if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
+  if (input.mode) winFilters.push(sql`play_mode = ${input.mode}`);
+  if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
+  const winWhere = sql`where ${sql.join(winFilters as any, sql` and `)}`;
+
+  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
+
+  const rows = await db.all<LeaderboardEntryRow>(sql`
+    select
+      u.id as userId,
+      u.display_name as displayName,
+      u.avatar_url as avatarUrl,
+      (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) as value
+    from users u
+    left join (
+      select user_id, count(*) as wins
+      from game_completions
+      ${winWhere}
+      group by user_id
+    ) w on w.user_id = u.id
+    left join (
+      select user_id, count(*) as dailies
+      from user_daily_completions
+      ${dailyWhere}
+      group by user_id
+    ) d on d.user_id = u.id
+    where u.deleted_at is null and u.provider != 'guest'
+      and (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) > 0
+    order by value desc, u.updated_at desc
+    limit ${input.limit}
+    offset ${offset}
+  `);
+  return rows;
+}
+
+export async function listLeaderboardSpeed(
+  db: AppDb,
+  input: {
+    period: LeaderboardPeriod;
+    limit: number;
+    cursor?: number;
+    mode?: 'classic' | 'hell';
+    difficultyId?: string;
+  },
+): Promise<LeaderboardEntryRow[]> {
+  const fromDate = computeFromDate(input.period);
+  const isFiltered = Boolean(input.mode || input.difficultyId);
+  const offset = Math.max(0, input.cursor ?? 0);
+
+  const winFilters: unknown[] = [sql`result = 'win'`];
+  if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
+  if (input.mode) winFilters.push(sql`play_mode = ${input.mode}`);
+  if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
+  const winWhere = sql`where ${sql.join(winFilters as any, sql` and `)}`;
+
+  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
+
+  const rows = await db.all<LeaderboardEntryRow>(sql`
+    with best_win as (
+      select user_id, min(elapsed_seconds) as bestWin
+      from game_completions
+      ${winWhere}
+      group by user_id
+    ),
+    best_daily as (
+      select user_id, min(elapsed_seconds) as bestDaily
+      from user_daily_completions
+      ${dailyWhere}
+      group by user_id
+    )
+    select
+      u.id as userId,
+      u.display_name as displayName,
+      u.avatar_url as avatarUrl,
+      case
+        when bw.bestWin is null then ${isFiltered ? sql`null` : sql`bd.bestDaily`}
+        when ${isFiltered ? sql`true` : sql`bd.bestDaily is null`} then bw.bestWin
+        when bw.bestWin < bd.bestDaily then bw.bestWin
+        else bd.bestDaily
+      end as value
+    from users u
+    left join best_win bw on bw.user_id = u.id
+    left join best_daily bd on bd.user_id = u.id
+    where u.deleted_at is null and u.provider != 'guest'
+      and (bw.bestWin is not null ${isFiltered ? sql`` : sql`or bd.bestDaily is not null`})
+    order by value asc, u.updated_at desc
+    limit ${input.limit}
+    offset ${offset}
+  `);
+  return rows;
+}
+
+export async function listLeaderboardStreak(
+  db: AppDb,
+  input: { period: LeaderboardPeriod; limit: number; cursor?: number },
+): Promise<LeaderboardEntryRow[]> {
+  // streak 本质是“到今天为止连续完成天数”，这里取最近 120 天的 daily 记录来计算。
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const from = new Date(today);
+  from.setDate(from.getDate() - 119);
+  const fromKey = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`;
+
+  const rows = await db.all<{
+    userId: string;
+    displayName: string;
+    avatarUrl: string | null;
+    dateKey: string;
+  }>(sql`
+    select
+      u.id as userId,
+      u.display_name as displayName,
+      u.avatar_url as avatarUrl,
+      d.date_key as dateKey
+    from users u
+    inner join user_daily_completions d on d.user_id = u.id
+    where u.deleted_at is null and u.provider != 'guest'
+      and d.date_key >= ${fromKey}
+    order by u.id asc, d.date_key desc
+  `);
+
+  const byUser = new Map<string, { displayName: string; avatarUrl: string | null; keys: string[] }>();
+  for (const r of rows) {
+    const cur = byUser.get(r.userId) ?? { displayName: r.displayName, avatarUrl: r.avatarUrl, keys: [] };
+    cur.keys.push(r.dateKey);
+    byUser.set(r.userId, cur);
+  }
+
+  const scored: LeaderboardEntryRow[] = [];
+  for (const [userId, info] of byUser.entries()) {
+    const streak = computeStreak(info.keys, today);
+    if (streak <= 0) continue;
+    scored.push({
+      userId,
+      displayName: info.displayName,
+      avatarUrl: info.avatarUrl,
+      value: streak,
+    });
+  }
+
+  scored.sort((a, b) => b.value - a.value || a.userId.localeCompare(b.userId));
+  const offset = Math.max(0, input.cursor ?? 0);
+  return scored.slice(offset, offset + input.limit);
 }
 
 export async function deleteUserData(db: AppDb, userId: string) {

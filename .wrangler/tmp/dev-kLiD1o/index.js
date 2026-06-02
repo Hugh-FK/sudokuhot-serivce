@@ -4618,10 +4618,10 @@ var require_dist = __commonJS({
   }
 });
 
-// .wrangler/tmp/bundle-cE4GTH/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-euClX9/middleware-loader.entry.ts
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-cE4GTH/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-euClX9/middleware-insertion-facade.js
 init_modules_watch_stub();
 
 // src/index.ts
@@ -35088,6 +35088,65 @@ function addDaysIso(days) {
 }
 __name(addDaysIso, "addDaysIso");
 
+// src/lib/daily-catalog.ts
+init_modules_watch_stub();
+var DAILY_TIP_IDS = [
+  "focusBoxes",
+  "singleCandidate",
+  "pencilMarks",
+  "scanRows",
+  "hiddenSingle",
+  "breathing"
+];
+function toDateKey(date3) {
+  const y = date3.getFullYear();
+  const m = String(date3.getMonth() + 1).padStart(2, "0");
+  const d = String(date3.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+__name(toDateKey, "toDateKey");
+function buildPuzzleSeed(dateKey, difficultyId) {
+  return `daily:${dateKey}:${difficultyId}`;
+}
+__name(buildPuzzleSeed, "buildPuzzleSeed");
+function pickTipId(dateKey) {
+  const date3 = new Date(dateKey.replace(/-/g, "/"));
+  const dayOfYear = Math.floor(
+    (date3.getTime() - new Date(date3.getFullYear(), 0, 0).getTime()) / 864e5
+  );
+  return DAILY_TIP_IDS[dayOfYear % DAILY_TIP_IDS.length] ?? "focusBoxes";
+}
+__name(pickTipId, "pickTipId");
+function getDailyChallengeDefinition(dateKey, reference = /* @__PURE__ */ new Date()) {
+  const difficultyId = "medium";
+  const parsed = new Date(dateKey.replace(/-/g, "/"));
+  const isValid = !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === dateKey;
+  const key = isValid ? dateKey : toDateKey(reference);
+  return {
+    dateKey: key,
+    difficultyId,
+    puzzleSeed: buildPuzzleSeed(key, difficultyId),
+    reward: { type: "badge", id: "sudoku-hot-daily" },
+    tipId: pickTipId(key)
+  };
+}
+__name(getDailyChallengeDefinition, "getDailyChallengeDefinition");
+function computeStreak(dateKeys, reference = /* @__PURE__ */ new Date()) {
+  if (dateKeys.length === 0) return 0;
+  const set = new Set(dateKeys);
+  let streak = 0;
+  const cursor = new Date(reference);
+  cursor.setHours(0, 0, 0, 0);
+  for (; ; ) {
+    const key = toDateKey(cursor);
+    if (!set.has(key)) break;
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+__name(computeStreak, "computeStreak");
+
 // src/db/repos.ts
 var DEFAULT_SETTINGS = JSON.stringify({
   mistakeLimit: "3",
@@ -35299,6 +35358,141 @@ async function listCommunityStats(db) {
   return db.select().from(difficultyCommunityStats);
 }
 __name(listCommunityStats, "listCommunityStats");
+function computeFromDate(period) {
+  if (period === "all") return null;
+  const now = /* @__PURE__ */ new Date();
+  now.setHours(0, 0, 0, 0);
+  const days = period === "7d" ? 6 : 29;
+  now.setDate(now.getDate() - days);
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+__name(computeFromDate, "computeFromDate");
+async function listLeaderboardWins(db, input) {
+  const fromDate = computeFromDate(input.period);
+  const isFiltered = Boolean(input.mode || input.difficultyId);
+  const offset = Math.max(0, input.cursor ?? 0);
+  const winFilters = [sql`result = 'win'`];
+  if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
+  if (input.mode) winFilters.push(sql`play_mode = ${input.mode}`);
+  if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
+  const winWhere = sql`where ${sql.join(winFilters, sql` and `)}`;
+  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
+  const rows = await db.all(sql`
+    select
+      u.id as userId,
+      u.display_name as displayName,
+      u.avatar_url as avatarUrl,
+      (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) as value
+    from users u
+    left join (
+      select user_id, count(*) as wins
+      from game_completions
+      ${winWhere}
+      group by user_id
+    ) w on w.user_id = u.id
+    left join (
+      select user_id, count(*) as dailies
+      from user_daily_completions
+      ${dailyWhere}
+      group by user_id
+    ) d on d.user_id = u.id
+    where u.deleted_at is null and u.provider != 'guest'
+      and (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) > 0
+    order by value desc, u.updated_at desc
+    limit ${input.limit}
+    offset ${offset}
+  `);
+  return rows;
+}
+__name(listLeaderboardWins, "listLeaderboardWins");
+async function listLeaderboardSpeed(db, input) {
+  const fromDate = computeFromDate(input.period);
+  const isFiltered = Boolean(input.mode || input.difficultyId);
+  const offset = Math.max(0, input.cursor ?? 0);
+  const winFilters = [sql`result = 'win'`];
+  if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
+  if (input.mode) winFilters.push(sql`play_mode = ${input.mode}`);
+  if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
+  const winWhere = sql`where ${sql.join(winFilters, sql` and `)}`;
+  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
+  const rows = await db.all(sql`
+    with best_win as (
+      select user_id, min(elapsed_seconds) as bestWin
+      from game_completions
+      ${winWhere}
+      group by user_id
+    ),
+    best_daily as (
+      select user_id, min(elapsed_seconds) as bestDaily
+      from user_daily_completions
+      ${dailyWhere}
+      group by user_id
+    )
+    select
+      u.id as userId,
+      u.display_name as displayName,
+      u.avatar_url as avatarUrl,
+      case
+        when bw.bestWin is null then ${isFiltered ? sql`null` : sql`bd.bestDaily`}
+        when ${isFiltered ? sql`true` : sql`bd.bestDaily is null`} then bw.bestWin
+        when bw.bestWin < bd.bestDaily then bw.bestWin
+        else bd.bestDaily
+      end as value
+    from users u
+    left join best_win bw on bw.user_id = u.id
+    left join best_daily bd on bd.user_id = u.id
+    where u.deleted_at is null and u.provider != 'guest'
+      and (bw.bestWin is not null ${isFiltered ? sql`` : sql`or bd.bestDaily is not null`})
+    order by value asc, u.updated_at desc
+    limit ${input.limit}
+    offset ${offset}
+  `);
+  return rows;
+}
+__name(listLeaderboardSpeed, "listLeaderboardSpeed");
+async function listLeaderboardStreak(db, input) {
+  const today = /* @__PURE__ */ new Date();
+  today.setHours(0, 0, 0, 0);
+  const from = new Date(today);
+  from.setDate(from.getDate() - 119);
+  const fromKey = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
+  const rows = await db.all(sql`
+    select
+      u.id as userId,
+      u.display_name as displayName,
+      u.avatar_url as avatarUrl,
+      d.date_key as dateKey
+    from users u
+    inner join user_daily_completions d on d.user_id = u.id
+    where u.deleted_at is null and u.provider != 'guest'
+      and d.date_key >= ${fromKey}
+    order by u.id asc, d.date_key desc
+  `);
+  const byUser = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    const cur = byUser.get(r.userId) ?? { displayName: r.displayName, avatarUrl: r.avatarUrl, keys: [] };
+    cur.keys.push(r.dateKey);
+    byUser.set(r.userId, cur);
+  }
+  const scored = [];
+  for (const [userId, info] of byUser.entries()) {
+    const streak = computeStreak(info.keys, today);
+    if (streak <= 0) continue;
+    scored.push({
+      userId,
+      displayName: info.displayName,
+      avatarUrl: info.avatarUrl,
+      value: streak
+    });
+  }
+  scored.sort((a, b) => b.value - a.value || a.userId.localeCompare(b.userId));
+  const offset = Math.max(0, input.cursor ?? 0);
+  return scored.slice(offset, offset + input.limit);
+}
+__name(listLeaderboardStreak, "listLeaderboardStreak");
 async function deleteUserData(db, userId) {
   const now = isoNow();
   await db.delete(authSessions).where(eq(authSessions.userId, userId));
@@ -35311,65 +35505,6 @@ async function deleteUserData(db, userId) {
   await db.update(users).set({ deletedAt: now, updatedAt: now }).where(eq(users.id, userId));
 }
 __name(deleteUserData, "deleteUserData");
-
-// src/lib/daily-catalog.ts
-init_modules_watch_stub();
-var DAILY_TIP_IDS = [
-  "focusBoxes",
-  "singleCandidate",
-  "pencilMarks",
-  "scanRows",
-  "hiddenSingle",
-  "breathing"
-];
-function toDateKey(date3) {
-  const y = date3.getFullYear();
-  const m = String(date3.getMonth() + 1).padStart(2, "0");
-  const d = String(date3.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-__name(toDateKey, "toDateKey");
-function buildPuzzleSeed(dateKey, difficultyId) {
-  return `daily:${dateKey}:${difficultyId}`;
-}
-__name(buildPuzzleSeed, "buildPuzzleSeed");
-function pickTipId(dateKey) {
-  const date3 = new Date(dateKey.replace(/-/g, "/"));
-  const dayOfYear = Math.floor(
-    (date3.getTime() - new Date(date3.getFullYear(), 0, 0).getTime()) / 864e5
-  );
-  return DAILY_TIP_IDS[dayOfYear % DAILY_TIP_IDS.length] ?? "focusBoxes";
-}
-__name(pickTipId, "pickTipId");
-function getDailyChallengeDefinition(dateKey, reference = /* @__PURE__ */ new Date()) {
-  const difficultyId = "medium";
-  const parsed = new Date(dateKey.replace(/-/g, "/"));
-  const isValid = !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === dateKey;
-  const key = isValid ? dateKey : toDateKey(reference);
-  return {
-    dateKey: key,
-    difficultyId,
-    puzzleSeed: buildPuzzleSeed(key, difficultyId),
-    reward: { type: "badge", id: "sudoku-hot-daily" },
-    tipId: pickTipId(key)
-  };
-}
-__name(getDailyChallengeDefinition, "getDailyChallengeDefinition");
-function computeStreak(dateKeys, reference = /* @__PURE__ */ new Date()) {
-  if (dateKeys.length === 0) return 0;
-  const set = new Set(dateKeys);
-  let streak = 0;
-  const cursor = new Date(reference);
-  cursor.setHours(0, 0, 0, 0);
-  for (; ; ) {
-    const key = toDateKey(cursor);
-    if (!set.has(key)) break;
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
-}
-__name(computeStreak, "computeStreak");
 
 // src/services/aggregates.ts
 init_modules_watch_stub();
@@ -36360,6 +36495,52 @@ function createV1Routes(d1, cfEnv) {
         displayName: t.Optional(t.String())
       })
     }
+  ).get(
+    "/leaderboards",
+    async ({ query, set }) => {
+      const type = query.type;
+      const period = query.period ?? "all";
+      const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50)));
+      const cursor = Math.max(0, Number(query.cursor ?? 0) || 0);
+      const modeRaw = query.mode;
+      const difficultyIdRaw = query.difficultyId;
+      if (type !== "wins" && type !== "streak" && type !== "speed") {
+        set.status = 400;
+        return { error: "invalid_type" };
+      }
+      if (period !== "all" && period !== "30d" && period !== "7d") {
+        set.status = 400;
+        return { error: "invalid_period" };
+      }
+      const mode = modeRaw === "classic" || modeRaw === "hell" ? modeRaw : type === "streak" ? void 0 : "hell";
+      const difficultyId = difficultyIdRaw && ["easy", "medium", "hard", "expert", "master"].includes(difficultyIdRaw) ? difficultyIdRaw : type === "streak" ? void 0 : "master";
+      const pageSize = limit + 1;
+      const rows = type === "wins" ? await listLeaderboardWins(db, { period, limit: pageSize, cursor, mode, difficultyId }) : type === "speed" ? await listLeaderboardSpeed(db, { period, limit: pageSize, cursor, mode, difficultyId }) : await listLeaderboardStreak(db, { period, limit: pageSize, cursor });
+      const visible = rows.filter((r) => r.value > 0);
+      const hasMore = visible.length > limit;
+      const slice = visible.slice(0, limit);
+      return {
+        entries: slice.map((r, idx) => ({
+          rank: idx + 1 + cursor,
+          userId: r.userId,
+          displayName: r.displayName,
+          avatarUrl: r.avatarUrl,
+          value: r.value,
+          updatedAt: r.updatedAt
+        })),
+        nextCursor: hasMore ? String(cursor + limit) : null
+      };
+    },
+    {
+      query: t.Object({
+        type: t.String(),
+        period: t.Optional(t.String()),
+        limit: t.Optional(t.Union([t.String(), t.Number()])),
+        cursor: t.Optional(t.String()),
+        mode: t.Optional(t.String()),
+        difficultyId: t.Optional(t.String())
+      })
+    }
   ).get("/auth/session", async ({ request }) => {
     const user = await requireUser(request.headers.get("authorization") ?? void 0);
     const profile = await getProfile(db, user.id);
@@ -36741,7 +36922,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env4, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-cE4GTH/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-euClX9/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -36774,7 +36955,7 @@ function __facade_invoke__(request, env4, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-cE4GTH/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-euClX9/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

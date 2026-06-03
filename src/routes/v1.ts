@@ -365,7 +365,7 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
       },
       {
         body: t.Object({
-          currentPassword: authPasswordBody,
+          currentPassword: t.Optional(authPasswordBody),
           newPassword: authPasswordBody,
         }),
       },

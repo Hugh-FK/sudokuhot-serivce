@@ -74,18 +74,21 @@ export async function loginWithPassword(
 export async function changeUserPassword(
   db: AppDb,
   userId: string,
-  input: { currentPassword: string; newPassword: string },
+  input: { currentPassword?: string; newPassword: string },
 ) {
   const strength = assertPasswordStrength(input.newPassword);
   if (strength) return { ok: false as const, error: strength };
 
   const user = await getUserById(db, userId);
-  if (!user?.passwordHash) {
+  if (!user) return { ok: false as const, error: 'unknown' };
+
+  const currentPassword = input.currentPassword?.trim() ?? '';
+  if (currentPassword && user.passwordHash) {
+    const valid = await verifyPassword(currentPassword, user.passwordHash);
+    if (!valid) return { ok: false as const, error: 'wrong_password' };
+  } else if (currentPassword && !user.passwordHash) {
     return { ok: false as const, error: 'password_not_set' };
   }
-
-  const valid = await verifyPassword(input.currentPassword, user.passwordHash);
-  if (!valid) return { ok: false as const, error: 'wrong_password' };
 
   const passwordHash = await hashPassword(input.newPassword);
   await updateUserPasswordHash(db, userId, passwordHash);

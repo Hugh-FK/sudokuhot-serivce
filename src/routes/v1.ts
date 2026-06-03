@@ -169,6 +169,10 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
         set.status = 503;
         return { error: 'google_oauth_not_configured' };
       }
+      if (error instanceof Error && error.message === 'GOOGLE_ID_ALREADY_LINKED') {
+        set.status = 409;
+        return { error: 'google_account_linked_to_other_user' };
+      }
       if (error instanceof Error && error.message.startsWith('GOOGLE_')) {
         set.status = 400;
         return { error: 'google_oauth_failed' };

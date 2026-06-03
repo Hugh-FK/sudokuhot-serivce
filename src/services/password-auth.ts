@@ -7,13 +7,12 @@ import {
   updateUserPasswordHash,
 } from '../db/repos';
 import { hashPassword, verifyPassword } from '../lib/crypto';
+import { normalizeAuthEmail } from '../lib/email';
 
 const MIN_PASSWORD_LEN = 8;
 const MAX_PASSWORD_LEN = 128;
 
-export function normalizeAuthEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
+export { normalizeAuthEmail };
 
 export function assertPasswordStrength(password: string): string | null {
   if (password.length < MIN_PASSWORD_LEN) return 'password_too_short';

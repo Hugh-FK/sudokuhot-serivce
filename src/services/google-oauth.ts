@@ -1,12 +1,6 @@
 import type { AppDb } from '../db';
-import {
-  createAuthSession,
-  createUser,
-  getUserByEmail,
-  getUserByGoogleId,
-  getUserById,
-  patchProfile,
-} from '../db/repos';
+import { createAuthSession, getUserById, resolveUserForGoogleSignIn } from '../db/repos';
+import { normalizeAuthEmail } from '../lib/email';
 import type { Env } from '../env';
 import { getEnv } from '../env';
 
@@ -142,26 +136,13 @@ export async function completeGoogleSignIn(
   const locale = info.locale?.trim() || null;
   const googleId = info.id;
 
-  const googlePatch = {
+  const user = await resolveUserForGoogleSignIn(db, {
     googleId,
-    email: info.email,
+    email: normalizeAuthEmail(info.email),
     displayName,
     avatarUrl,
     locale,
-  };
-
-  let user = await getUserByGoogleId(db, googleId);
-  if (!user) user = await getUserByEmail(db, info.email);
-
-  if (!user) {
-    user = await createUser(db, {
-      ...googlePatch,
-      provider: 'google',
-    });
-  } else {
-    await patchProfile(db, user.id, googlePatch);
-    user = (await getUserById(db, user.id))!;
-  }
+  });
 
   const full = (await getUserById(db, user.id))!;
   const { token, expiresAt } = await createAuthSession(db, user.id);

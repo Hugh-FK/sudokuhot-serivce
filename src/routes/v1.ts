@@ -61,6 +61,15 @@ import {
   requireGoogleOAuthConfig,
   requireOAuthStateSecret,
 } from '../services/google-oauth';
+import {
+  changeUserPassword,
+  loginWithPassword,
+  normalizeAuthEmail,
+  registerWithPassword,
+} from '../services/password-auth';
+
+const authPasswordBody = t.String({ minLength: 8, maxLength: 128 });
+const authEmailBody = t.String({ format: 'email', maxLength: 255 });
 
 function sessionToApi(row: NonNullable<Awaited<ReturnType<typeof getGameSession>>>) {
   return {
@@ -276,6 +285,87 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
         user: userToApi(user),
       };
     })
+    .get(
+      '/auth/email',
+      async ({ query, set }) => {
+        const email = normalizeAuthEmail(query.email);
+        if (!email.includes('@')) {
+          set.status = 400;
+          return { error: 'invalid_email' };
+        }
+        const user = await getUserByEmail(db, email);
+        return { exists: Boolean(user) };
+      },
+      {
+        query: t.Object({
+          email: t.String({ minLength: 3, maxLength: 255 }),
+        }),
+      },
+    )
+    .post(
+      '/auth/register',
+      async ({ body, set }) => {
+        const result = await registerWithPassword(db, body);
+        if (!result.ok) {
+          if (result.error === 'email_taken') set.status = 409;
+          else set.status = 400;
+          return { error: result.error };
+        }
+        return {
+          token: result.token,
+          expiresAt: result.expiresAt,
+          user: userToApi(result.user),
+        };
+      },
+      {
+        body: t.Object({
+          email: authEmailBody,
+          password: authPasswordBody,
+          displayName: t.Optional(t.String({ minLength: 1, maxLength: 64 })),
+        }),
+      },
+    )
+    .post(
+      '/auth/login',
+      async ({ body, set }) => {
+        const result = await loginWithPassword(db, body);
+        if (!result.ok) {
+          set.status = 401;
+          return { error: result.error };
+        }
+        return {
+          token: result.token,
+          expiresAt: result.expiresAt,
+          user: userToApi(result.user),
+        };
+      },
+      {
+        body: t.Object({
+          email: authEmailBody,
+          password: authPasswordBody,
+        }),
+      },
+    )
+    .patch(
+      '/auth/password',
+      async ({ body, request, set }) => {
+        const user = await requireUser(request.headers.get('authorization') ?? undefined);
+        const result = await changeUserPassword(db, user.id, body);
+        if (!result.ok) {
+          if (result.error === 'wrong_password') set.status = 401;
+          else if (result.error === 'password_not_set') set.status = 400;
+          else set.status = 400;
+          return { error: result.error };
+        }
+        return { ok: true };
+      },
+      {
+        body: t.Object({
+          currentPassword: authPasswordBody,
+          newPassword: authPasswordBody,
+        }),
+      },
+    )
     .post(
       '/auth/session',
       async ({ body }) => {

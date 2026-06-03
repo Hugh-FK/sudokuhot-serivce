@@ -33,6 +33,7 @@ export async function createUser(
     avatarUrl?: string | null;
     googleId?: string | null;
     locale?: string | null;
+    passwordHash?: string | null;
   },
 ) {
   const id = newId();
@@ -45,6 +46,7 @@ export async function createUser(
     googleId: input.googleId ?? null,
     locale: input.locale ?? null,
     provider: input.provider,
+    passwordHash: input.passwordHash ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -89,19 +91,28 @@ export async function getUserByGoogleId(db: AppDb, googleId: string) {
   return rows[0] ?? null;
 }
 
+/** 每用户仅一条会话；再次登录刷新 token_hash 与 expires_at，旧 token 失效 */
 export async function createAuthSession(db: AppDb, userId: string) {
   const token = newToken();
   const tokenHash = await hashToken(token);
-  const id = newId();
   const expiresAt = addDaysIso(30);
   const now = isoNow();
-  await db.insert(authSessions).values({
-    id,
-    userId,
-    tokenHash,
-    expiresAt,
-    createdAt: now,
-  });
+  await db
+    .insert(authSessions)
+    .values({
+      id: newId(),
+      userId,
+      tokenHash,
+      expiresAt,
+      createdAt: now,
+    })
+    .onConflictDoUpdate({
+      target: authSessions.userId,
+      set: {
+        tokenHash,
+        expiresAt,
+      },
+    });
   return { token, expiresAt };
 }
 
@@ -124,6 +135,13 @@ export async function resolveUserByToken(db: AppDb, bearer: string | null) {
     )
     .limit(1);
   return rows[0]?.user ?? null;
+}
+
+export async function updateUserPasswordHash(db: AppDb, userId: string, passwordHash: string) {
+  await db
+    .update(users)
+    .set({ passwordHash, updatedAt: isoNow() })
+    .where(eq(users.id, userId));
 }
 
 export async function deleteAuthSessionByToken(db: AppDb, bearer: string | null) {

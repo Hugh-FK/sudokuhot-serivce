@@ -13,6 +13,7 @@ import {
   userSettings,
 } from './schema';
 import { addDaysIso, hashToken, isoNow, newId, newToken } from '../lib/crypto';
+import { normalizeAuthEmail } from '../lib/email';
 import { computeStreak } from '../lib/daily-catalog';
 
 export type { AppDb };
@@ -33,18 +34,24 @@ export async function createUser(
     avatarUrl?: string | null;
     googleId?: string | null;
     locale?: string | null;
+    passwordHash?: string | null;
   },
 ) {
   const id = newId();
   const now = isoNow();
+  const email =
+    input.email != null && input.email !== ''
+      ? normalizeAuthEmail(input.email)
+      : null;
   await db.insert(users).values({
     id,
-    email: input.email ?? null,
+    email,
     displayName: input.displayName,
     avatarUrl: input.avatarUrl ?? null,
     googleId: input.googleId ?? null,
     locale: input.locale ?? null,
     provider: input.provider,
+    passwordHash: input.passwordHash ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -72,12 +79,102 @@ export async function getUserById(db: AppDb, id: string) {
 }
 
 export async function getUserByEmail(db: AppDb, email: string) {
+  const normalized = normalizeAuthEmail(email);
   const rows = await db
     .select()
     .from(users)
-    .where(and(eq(users.email, email), isNull(users.deletedAt)))
+    .where(
+      and(
+        sql`lower(trim(${users.email})) = ${normalized}`,
+        isNull(users.deletedAt),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
+}
+
+/** Google 登录：绑定 google_id 并更新资料；同邮箱已注册用户合并到同一行 */
+export async function linkGoogleAccount(
+  db: AppDb,
+  userId: string,
+  input: {
+    googleId: string;
+    email: string;
+    displayName: string;
+    avatarUrl?: string | null;
+    locale?: string | null;
+  },
+) {
+  const email = normalizeAuthEmail(input.email);
+  const conflict = await getUserByGoogleId(db, input.googleId);
+  if (conflict && conflict.id !== userId) {
+    const conflictEmail = conflict.email ? normalizeAuthEmail(conflict.email) : '';
+    if (conflictEmail === email) {
+      await db.delete(authSessions).where(eq(authSessions.userId, conflict.id));
+      await db.delete(users).where(eq(users.id, conflict.id));
+    } else {
+      throw new Error('GOOGLE_ID_ALREADY_LINKED');
+    }
+  }
+
+  const current = await getUserById(db, userId);
+  const provider = current?.passwordHash ? 'email' : 'google';
+
+  await db
+    .update(users)
+    .set({
+      googleId: input.googleId,
+      email,
+      displayName: input.displayName,
+      avatarUrl: input.avatarUrl ?? null,
+      locale: input.locale ?? null,
+      provider,
+      updatedAt: isoNow(),
+    })
+    .where(eq(users.id, userId));
+}
+
+export async function resolveUserForGoogleSignIn(
+  db: AppDb,
+  input: {
+    googleId: string;
+    email: string;
+    displayName: string;
+    avatarUrl?: string | null;
+    locale?: string | null;
+  },
+) {
+  const email = normalizeAuthEmail(input.email);
+  const link = {
+    googleId: input.googleId,
+    email,
+    displayName: input.displayName,
+    avatarUrl: input.avatarUrl,
+    locale: input.locale,
+  };
+
+  const byGoogle = await getUserByGoogleId(db, input.googleId);
+  const byEmail = await getUserByEmail(db, email);
+
+  if (byGoogle && byEmail && byGoogle.id !== byEmail.id) {
+    await linkGoogleAccount(db, byEmail.id, link);
+    return (await getUserById(db, byEmail.id))!;
+  }
+
+  const existing = byGoogle ?? byEmail;
+  if (existing) {
+    await linkGoogleAccount(db, existing.id, link);
+    return (await getUserById(db, existing.id))!;
+  }
+
+  return createUser(db, {
+    email,
+    displayName: input.displayName,
+    avatarUrl: input.avatarUrl ?? null,
+    googleId: input.googleId,
+    locale: input.locale ?? null,
+    provider: 'google',
+  });
 }
 
 export async function getUserByGoogleId(db: AppDb, googleId: string) {
@@ -89,19 +186,28 @@ export async function getUserByGoogleId(db: AppDb, googleId: string) {
   return rows[0] ?? null;
 }
 
+/** 每用户仅一条会话；再次登录刷新 token_hash 与 expires_at，旧 token 失效 */
 export async function createAuthSession(db: AppDb, userId: string) {
   const token = newToken();
   const tokenHash = await hashToken(token);
-  const id = newId();
   const expiresAt = addDaysIso(30);
   const now = isoNow();
-  await db.insert(authSessions).values({
-    id,
-    userId,
-    tokenHash,
-    expiresAt,
-    createdAt: now,
-  });
+  await db
+    .insert(authSessions)
+    .values({
+      id: newId(),
+      userId,
+      tokenHash,
+      expiresAt,
+      createdAt: now,
+    })
+    .onConflictDoUpdate({
+      target: authSessions.userId,
+      set: {
+        tokenHash,
+        expiresAt,
+      },
+    });
   return { token, expiresAt };
 }
 
@@ -124,6 +230,13 @@ export async function resolveUserByToken(db: AppDb, bearer: string | null) {
     )
     .limit(1);
   return rows[0]?.user ?? null;
+}
+
+export async function updateUserPasswordHash(db: AppDb, userId: string, passwordHash: string) {
+  await db
+    .update(users)
+    .set({ passwordHash, updatedAt: isoNow() })
+    .where(eq(users.id, userId));
 }
 
 export async function deleteAuthSessionByToken(db: AppDb, bearer: string | null) {

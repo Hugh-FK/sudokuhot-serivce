@@ -24,7 +24,7 @@ users 1──0..1 game_sessions (进行中，应用层保证单条)
 users 1──* game_completions
 users 1──* user_daily_completions (PK: user_id + date_key)
 users 1──* blog_bookmarks
-users 1──* auth_sessions
+users 1──1 auth_sessions
 feedback_entries ──o users (可选登录)
 
 difficulty_community_stats (全局只读，柱图「玩家均值」)
@@ -55,10 +55,10 @@ difficulty_community_stats (全局只读，柱图「玩家均值」)
 | 列 | 类型 | 说明 |
 |----|------|------|
 | id | TEXT PK | UUID |
-| user_id | TEXT FK | |
-| token_hash | TEXT UNIQUE | SHA-256(token) |
-| expires_at | TEXT ISO | 默认 30 天 |
-| created_at | TEXT ISO | |
+| user_id | TEXT FK UNIQUE | 每用户一条；再次登录更新 token |
+| token_hash | TEXT UNIQUE | SHA-256(token)，登录时刷新 |
+| expires_at | TEXT ISO | 默认 30 天，登录时刷新 |
+| created_at | TEXT ISO | 首次创建会话时间 |
 
 ### 3.3 `user_profiles`
 

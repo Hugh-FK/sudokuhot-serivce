@@ -8,6 +8,7 @@ export const users = sqliteTable('users', {
   googleId: text('google_id'),
   locale: text('locale'),
   provider: text('provider').notNull().default('guest'),
+  passwordHash: text('password_hash'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
@@ -16,15 +17,19 @@ export const users = sqliteTable('users', {
   uniqueIndex('users_google_id_unique').on(t.googleId),
 ]);
 
-export const authSessions = sqliteTable('auth_sessions', {
-  id: text('id').primaryKey(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  tokenHash: text('token_hash').notNull().unique(),
-  expiresAt: text('expires_at').notNull(),
-  createdAt: text('created_at').notNull(),
-});
+export const authSessions = sqliteTable(
+  'auth_sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('auth_sessions_user_id_unique').on(t.userId)],
+);
 
 export const userProfiles = sqliteTable('user_profiles', {
   userId: text('user_id')

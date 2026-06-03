@@ -35149,7 +35149,7 @@ __name(computeStreak, "computeStreak");
 
 // src/db/repos.ts
 var DEFAULT_SETTINGS = JSON.stringify({
-  mistakeLimit: "3",
+  mistakeLimit: "10",
   highlightMatching: true,
   highlightRelated: true,
   showTimer: true
@@ -36635,7 +36635,12 @@ function createV1Routes(d1, cfEnv) {
     },
     {
       body: t.Object({
-        mistakeLimit: t.Union([t.Literal("3"), t.Literal("5"), t.Literal("unlimited")]),
+        mistakeLimit: t.Union([
+          t.Literal("3"),
+          t.Literal("5"),
+          t.Literal("10"),
+          t.Literal("unlimited")
+        ]),
         highlightMatching: t.Boolean(),
         highlightRelated: t.Boolean(),
         showTimer: t.Boolean()

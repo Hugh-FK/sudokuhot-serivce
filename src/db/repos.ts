@@ -18,7 +18,7 @@ import { computeStreak } from '../lib/daily-catalog';
 export type { AppDb };
 
 const DEFAULT_SETTINGS = JSON.stringify({
-  mistakeLimit: '3',
+  mistakeLimit: '10',
   highlightMatching: true,
   highlightRelated: true,
   showTimer: true,

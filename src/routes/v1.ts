@@ -18,9 +18,8 @@ import {
   insertCompletion,
   insertFeedback,
   listAllFeedback,
+  listLeaderboardPoints,
   listLeaderboardSpeed,
-  listLeaderboardStreak,
-  listLeaderboardWins,
   listBookmarks,
   listFeedbackForUser,
   listCommunityStats,
@@ -33,7 +32,7 @@ import {
   upsertDailyCompletion,
   upsertGameSession,
 } from '../db/repos';
-import { getDailyChallengeDefinition } from '../lib/daily-catalog';
+import { getDailyChallengeDefinition, getDailyChallengeDefinitionV2, parseDailyChallengeQuery } from '../lib/daily-catalog';
 import { isoNow, newId } from '../lib/crypto';
 import {
   buildDerivedStats,
@@ -105,6 +104,7 @@ function completionToApi(row: Awaited<ReturnType<typeof listCompletions>>[number
 function dailyToApi(row: Awaited<ReturnType<typeof listDailyCompletions>>[number]) {
   return {
     dateKey: row.dateKey,
+    mode: row.playMode as 'classic' | 'hell',
     difficultyId: row.difficultyId,
     elapsedSeconds: row.elapsedSeconds,
     mistakes: row.mistakes,
@@ -416,43 +416,37 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
     .get(
       '/leaderboards',
       async ({ query, set }) => {
-        const type = query.type as 'wins' | 'streak' | 'speed';
-        const period = (query.period ?? 'all') as 'all' | '30d' | '7d';
+        const typeRaw = query.type as string;
+        const type =
+          typeRaw === 'points' || typeRaw === 'wins' ? 'points' : typeRaw === 'speed' ? 'speed' : null;
+        const period = (query.period ?? 'all') as 'all' | '30d' | '7d' | 'today';
         const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50)));
         const cursor = Math.max(0, Number(query.cursor ?? 0) || 0);
         const modeRaw = query.mode;
         const difficultyIdRaw = query.difficultyId;
 
-        if (type !== 'wins' && type !== 'streak' && type !== 'speed') {
+        if (!type) {
           set.status = 400;
           return { error: 'invalid_type' };
         }
-        if (period !== 'all' && period !== '30d' && period !== '7d') {
+        if (period !== 'all' && period !== '30d' && period !== '7d' && period !== 'today') {
           set.status = 400;
           return { error: 'invalid_period' };
         }
 
         const mode =
-          modeRaw === 'classic' || modeRaw === 'hell'
-            ? (modeRaw as 'classic' | 'hell')
-            : type === 'streak'
-              ? undefined
-              : ('hell' as const);
+          modeRaw === 'classic' || modeRaw === 'hell' ? (modeRaw as 'classic' | 'hell') : ('hell' as const);
         const difficultyId =
           difficultyIdRaw &&
           ['easy', 'medium', 'hard', 'expert', 'master'].includes(difficultyIdRaw)
             ? difficultyIdRaw
-            : type === 'streak'
-              ? undefined
-              : ('master' as const);
+            : ('master' as const);
 
         const pageSize = limit + 1;
         const rows =
-          type === 'wins'
-            ? await listLeaderboardWins(db, { period, limit: pageSize, cursor, mode, difficultyId })
-            : type === 'speed'
-              ? await listLeaderboardSpeed(db, { period, limit: pageSize, cursor, mode, difficultyId })
-              : await listLeaderboardStreak(db, { period, limit: pageSize, cursor });
+          type === 'points'
+            ? await listLeaderboardPoints(db, { period, limit: pageSize, cursor, mode, difficultyId })
+            : await listLeaderboardSpeed(db, { period, limit: pageSize, cursor, mode, difficultyId });
 
         const visible = rows.filter((r) => r.value > 0);
         const hasMore = visible.length > limit;
@@ -647,10 +641,17 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
         }),
       },
     )
-    .get('/daily/challenges/:dateKey', async ({ params, request }) => {
+    .get('/daily/challenges/:dateKey', async ({ params, query, request }) => {
       const user = await requireUser(request.headers.get('authorization') ?? undefined);
-      const definition = getDailyChallengeDefinition(params.dateKey);
-      const completion = await getDailyCompletion(db, user.id, definition.dateKey);
+      const selection = parseDailyChallengeQuery(query);
+      const definition = getDailyChallengeDefinitionV2(params.dateKey, selection);
+      const completion = await getDailyCompletion(
+        db,
+        user.id,
+        definition.dateKey,
+        definition.mode,
+        definition.difficultyId,
+      );
       const daily = await listDailyCompletions(db, user.id);
       return {
         definition,
@@ -664,9 +665,26 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
       '/daily/completions',
       async ({ body, request }) => {
         const user = await requireUser(request.headers.get('authorization') ?? undefined);
+        const playMode = body.playMode === 'hell' ? 'hell' : 'classic';
+        const existing = await getDailyCompletion(
+          db,
+          user.id,
+          body.dateKey,
+          playMode,
+          body.difficultyId,
+        );
+        if (existing) {
+          return {
+            ok: true,
+            alreadyCompleted: true,
+            completedAt: existing.completedAt,
+            completion: dailyToApi(existing),
+          };
+        }
         const completedAt = isoNow();
         await upsertDailyCompletion(db, user.id, {
           dateKey: body.dateKey,
+          playMode,
           difficultyId: body.difficultyId,
           elapsedSeconds: body.elapsedSeconds,
           mistakes: body.mistakes,
@@ -674,11 +692,12 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
           completedAt,
         });
         await deleteGameSession(db, user.id);
-        return { ok: true, completedAt };
+        return { ok: true, alreadyCompleted: false, completedAt };
       },
       {
         body: t.Object({
           dateKey: t.String(),
+          playMode: t.Optional(t.Union([t.Literal('classic'), t.Literal('hell')])),
           difficultyId: t.String(),
           elapsedSeconds: t.Number(),
           mistakes: t.Number(),

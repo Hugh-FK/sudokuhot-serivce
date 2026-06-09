@@ -12,6 +12,33 @@ import { buildSummary } from './aggregates';
 type CompletionRow = typeof gameCompletions.$inferSelect;
 type DailyRow = typeof userDailyCompletions.$inferSelect;
 
+function normalizeElapsedSeconds(value: number): number {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return value;
+}
+
+function dailyCompletionAsWin(d: DailyRow): CompletionRow {
+  return {
+    id: `daily-${d.userId}-${d.dateKey}-${d.playMode}-${d.difficultyId}`,
+    userId: d.userId,
+    playMode: d.playMode,
+    difficultyId: d.difficultyId,
+    dailyDateKey: d.dateKey,
+    result: 'win',
+    elapsedSeconds: normalizeElapsedSeconds(d.elapsedSeconds),
+    mistakes: d.mistakes,
+    hintsUsed: d.hintsUsed,
+    completedAt: d.completedAt,
+  };
+}
+
+function allAchievementWins(completions: CompletionRow[], daily: DailyRow[]): CompletionRow[] {
+  const gameWins = completions
+    .filter((c) => c.result === 'win')
+    .map((c) => ({ ...c, elapsedSeconds: normalizeElapsedSeconds(c.elapsedSeconds) }));
+  return [...gameWins, ...daily.map(dailyCompletionAsWin)];
+}
+
 type Evaluated = {
   unlocked: boolean;
   progress?: { current: number; total: number };
@@ -139,25 +166,31 @@ function buildRecent(wins: CompletionRow[], summary: ReturnType<typeof buildSumm
     });
   }
 
-  const speedWin = [...wins]
-    .filter((c) => c.elapsedSeconds <= 180)
-    .sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
-  if (speedWin) {
-    items.push({ achievementId: 'speedDemon', icon: 'timer', iconTone: 'blue', completedAt: speedWin.completedAt });
+  if (evaluate('speedDemon', wins, summary).unlocked) {
+    const speedWin = [...wins]
+      .filter((c) => c.elapsedSeconds <= 180)
+      .sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
+    if (speedWin) {
+      items.push({ achievementId: 'speedDemon', icon: 'timer', iconTone: 'blue', completedAt: speedWin.completedAt });
+    }
   }
 
-  const hardWin = [...wins]
-    .filter((c) => c.difficultyId === 'hard' && c.hintsUsed === 0)
-    .sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
-  if (hardWin) {
-    items.push({ achievementId: 'masterOfLogic', icon: 'stars', iconTone: 'yellow', completedAt: hardWin.completedAt });
+  if (evaluate('masterOfLogic', wins, summary).unlocked) {
+    const hardWin = [...wins]
+      .filter((c) => c.difficultyId === 'hard' && c.hintsUsed === 0)
+      .sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
+    if (hardWin) {
+      items.push({ achievementId: 'masterOfLogic', icon: 'stars', iconTone: 'yellow', completedAt: hardWin.completedAt });
+    }
   }
 
-  const hellWin = [...wins]
-    .filter((c) => c.playMode === 'hell')
-    .sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
-  if (hellWin && items.length < 3) {
-    items.push({ achievementId: 'killerKing', icon: 'skull', iconTone: 'yellow', completedAt: hellWin.completedAt });
+  if (evaluate('killerKing', wins, summary).unlocked) {
+    const hellWin = [...wins]
+      .filter((c) => c.playMode === 'hell')
+      .sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
+    if (hellWin) {
+      items.push({ achievementId: 'killerKing', icon: 'skull', iconTone: 'yellow', completedAt: hellWin.completedAt });
+    }
   }
 
   return items.sort((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 3);
@@ -189,7 +222,7 @@ export function buildAchievementHallView(
     };
   }
 
-  const wins = completions.filter((c) => c.result === 'win');
+  const wins = allAchievementWins(completions, daily);
   const categories = ACHIEVEMENT_CATEGORIES.map((cat) => ({
     id: cat.id,
     achievements: cat.achievements.map((base) => mergeCard(base, evaluate(base.id, wins, summary))),
@@ -232,7 +265,7 @@ export function buildStatsAchievementUnlocks(
   daily: DailyRow[],
 ) {
   const summary = buildSummary(completions, daily);
-  const wins = completions.filter((c) => c.result === 'win');
+  const wins = allAchievementWins(completions, daily);
   const hasLive = summary.totalGames > 0;
   if (!hasLive) {
     return {

@@ -51,22 +51,28 @@ export function buildSummary(
 
   let bestWinSeconds: number | null = null;
   let bestWinDifficulty: string | null = null;
+  let totalPlaySeconds = 0;
+  let timedGames = 0;
   for (const c of wins) {
-    if (bestWinSeconds === null || c.elapsedSeconds < bestWinSeconds) {
-      bestWinSeconds = c.elapsedSeconds;
+    const elapsed = c.elapsedSeconds;
+    if (elapsed <= 0) continue;
+    totalPlaySeconds += elapsed;
+    timedGames += 1;
+    if (bestWinSeconds === null || elapsed < bestWinSeconds) {
+      bestWinSeconds = elapsed;
       bestWinDifficulty = c.difficultyId;
     }
   }
   for (const d of daily) {
-    if (bestWinSeconds === null || d.elapsedSeconds < bestWinSeconds) {
-      bestWinSeconds = d.elapsedSeconds;
+    const elapsed = d.elapsedSeconds;
+    if (elapsed <= 0) continue;
+    totalPlaySeconds += elapsed;
+    timedGames += 1;
+    if (bestWinSeconds === null || elapsed < bestWinSeconds) {
+      bestWinSeconds = elapsed;
       bestWinDifficulty = d.difficultyId;
     }
   }
-
-  const totalPlaySeconds =
-    completions.reduce((s, c) => s + c.elapsedSeconds, 0) +
-    daily.reduce((s, d) => s + d.elapsedSeconds, 0);
 
   const winRate = totalGames > 0 ? Math.round((winCount / totalGames) * 1000) / 10 : 0;
 
@@ -80,6 +86,7 @@ export function buildSummary(
     bestWinDifficulty,
     dailyStreak: computeStreak(dailyKeys, reference),
     dailyCompletions: daily.length,
+    timedGames,
   };
 }
 
@@ -102,7 +109,7 @@ export function buildDerivedStats(
       useLiveData: false,
       totalGames: '0',
       winRate: 0,
-      avgTime: '00:00',
+      avgTime: '—',
       bestTime: '—',
       bestTimeDifficulty: 'medium',
       accuracy: '—',
@@ -118,7 +125,9 @@ export function buildDerivedStats(
   const totalPlaySeconds = usePeriod
     ? periodSummary.totalPlaySeconds
     : global.totalPlaySeconds;
-  const avgSeconds = totalGames > 0 ? Math.round(totalPlaySeconds / totalGames) : 0;
+  const timedGames = usePeriod ? periodSummary.timedGames : global.timedGames;
+  const avgSeconds =
+    timedGames > 0 ? Math.round(totalPlaySeconds / timedGames) : 0;
 
   const finished = filteredCompletions.filter((c) => c.result === 'win' || c.result === 'loss');
   let accuracy = '—';
@@ -136,8 +145,8 @@ export function buildDerivedStats(
     useLiveData: true,
     totalGames: String(totalGames),
     winRate,
-    avgTime: formatTime(avgSeconds),
-    bestTime: bestSeconds !== null ? formatTime(bestSeconds) : '—',
+    avgTime: timedGames > 0 ? formatTime(avgSeconds) : '—',
+    bestTime: bestSeconds !== null && bestSeconds > 0 ? formatTime(bestSeconds) : '—',
     bestTimeDifficulty: bestDiff ?? 'medium',
     accuracy,
     streakDays: global.dailyStreak,

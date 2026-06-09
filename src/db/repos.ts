@@ -14,7 +14,6 @@ import {
 } from './schema';
 import { addDaysIso, hashToken, isoNow, newId, newToken } from '../lib/crypto';
 import { normalizeAuthEmail } from '../lib/email';
-import { computeStreak } from '../lib/daily-catalog';
 
 export type { AppDb };
 
@@ -382,28 +381,37 @@ export async function upsertDailyCompletion(
   db: AppDb,
   userId: string,
   row: Omit<typeof userDailyCompletions.$inferInsert, 'userId'>,
-) {
-  await db
-    .insert(userDailyCompletions)
-    .values({ ...row, userId })
-    .onConflictDoUpdate({
-      target: [userDailyCompletions.userId, userDailyCompletions.dateKey],
-      set: {
-        difficultyId: row.difficultyId,
-        elapsedSeconds: row.elapsedSeconds,
-        mistakes: row.mistakes,
-        hintsUsed: row.hintsUsed,
-        completedAt: row.completedAt,
-      },
-    });
+): Promise<'inserted' | 'exists'> {
+  const existing = await getDailyCompletion(
+    db,
+    userId,
+    row.dateKey,
+    row.playMode ?? 'classic',
+    row.difficultyId,
+  );
+  if (existing) return 'exists';
+
+  await db.insert(userDailyCompletions).values({ ...row, userId, playMode: row.playMode ?? 'classic' });
+  return 'inserted';
 }
 
-export async function getDailyCompletion(db: AppDb, userId: string, dateKey: string) {
+export async function getDailyCompletion(
+  db: AppDb,
+  userId: string,
+  dateKey: string,
+  playMode: string,
+  difficultyId: string,
+) {
   const rows = await db
     .select()
     .from(userDailyCompletions)
     .where(
-      and(eq(userDailyCompletions.userId, userId), eq(userDailyCompletions.dateKey, dateKey)),
+      and(
+        eq(userDailyCompletions.userId, userId),
+        eq(userDailyCompletions.dateKey, dateKey),
+        eq(userDailyCompletions.playMode, playMode),
+        eq(userDailyCompletions.difficultyId, difficultyId),
+      ),
     )
     .limit(1);
   return rows[0] ?? null;
@@ -483,8 +491,8 @@ export async function listCommunityStats(db: AppDb) {
   return db.select().from(difficultyCommunityStats);
 }
 
-export type LeaderboardType = 'wins' | 'streak' | 'speed';
-export type LeaderboardPeriod = 'all' | '30d' | '7d';
+export type LeaderboardType = 'points' | 'speed';
+export type LeaderboardPeriod = 'all' | '30d' | '7d' | 'today';
 
 export type LeaderboardEntryRow = {
   userId: string;
@@ -494,19 +502,38 @@ export type LeaderboardEntryRow = {
   updatedAt?: string;
 };
 
+function formatDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function computeFromDate(period: LeaderboardPeriod): string | null {
   if (period === 'all') return null;
   const now = new Date();
   now.setHours(0, 0, 0, 0);
+  if (period === 'today') return formatDateKey(now);
   const days = period === '7d' ? 6 : 29;
   now.setDate(now.getDate() - days);
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return formatDateKey(now);
 }
 
-export async function listLeaderboardWins(
+function buildDailyWhere(input: {
+  fromDate: string | null;
+  mode?: 'classic' | 'hell';
+  difficultyId?: string;
+}) {
+  const filters: unknown[] = [];
+  if (input.fromDate) filters.push(sql`date_key >= ${input.fromDate}`);
+  if (input.mode) filters.push(sql`play_mode = ${input.mode}`);
+  if (input.difficultyId) filters.push(sql`difficulty_id = ${input.difficultyId}`);
+  if (filters.length === 0) return sql``;
+  return sql`where ${sql.join(filters as any, sql` and `)}`;
+}
+
+/** 积分榜：每局胜场 + 每次每日挑战完成各计 1 分 */
+export async function listLeaderboardPoints(
   db: AppDb,
   input: {
     period: LeaderboardPeriod;
@@ -517,8 +544,12 @@ export async function listLeaderboardWins(
   },
 ): Promise<LeaderboardEntryRow[]> {
   const fromDate = computeFromDate(input.period);
-  const isFiltered = Boolean(input.mode || input.difficultyId);
   const offset = Math.max(0, input.cursor ?? 0);
+  const dailyWhere = buildDailyWhere({
+    fromDate,
+    mode: input.mode,
+    difficultyId: input.difficultyId,
+  });
 
   const winFilters: unknown[] = [sql`result = 'win'`];
   if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
@@ -526,14 +557,12 @@ export async function listLeaderboardWins(
   if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
   const winWhere = sql`where ${sql.join(winFilters as any, sql` and `)}`;
 
-  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
-
   const rows = await db.all<LeaderboardEntryRow>(sql`
     select
       u.id as userId,
       u.display_name as displayName,
       u.avatar_url as avatarUrl,
-      (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) as value
+      (coalesce(w.wins, 0) + coalesce(d.dailies, 0)) as value
     from users u
     left join (
       select user_id, count(*) as wins
@@ -548,7 +577,7 @@ export async function listLeaderboardWins(
       group by user_id
     ) d on d.user_id = u.id
     where u.deleted_at is null and u.provider != 'guest'
-      and (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) > 0
+      and (coalesce(w.wins, 0) + coalesce(d.dailies, 0)) > 0
     order by value desc, u.updated_at desc
     limit ${input.limit}
     offset ${offset}
@@ -567,16 +596,18 @@ export async function listLeaderboardSpeed(
   },
 ): Promise<LeaderboardEntryRow[]> {
   const fromDate = computeFromDate(input.period);
-  const isFiltered = Boolean(input.mode || input.difficultyId);
   const offset = Math.max(0, input.cursor ?? 0);
+  const dailyWhere = buildDailyWhere({
+    fromDate,
+    mode: input.mode,
+    difficultyId: input.difficultyId,
+  });
 
   const winFilters: unknown[] = [sql`result = 'win'`];
   if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
   if (input.mode) winFilters.push(sql`play_mode = ${input.mode}`);
   if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
   const winWhere = sql`where ${sql.join(winFilters as any, sql` and `)}`;
-
-  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
 
   const rows = await db.all<LeaderboardEntryRow>(sql`
     with best_win as (
@@ -596,8 +627,8 @@ export async function listLeaderboardSpeed(
       u.display_name as displayName,
       u.avatar_url as avatarUrl,
       case
-        when bw.bestWin is null then ${isFiltered ? sql`null` : sql`bd.bestDaily`}
-        when ${isFiltered ? sql`true` : sql`bd.bestDaily is null`} then bw.bestWin
+        when bw.bestWin is null then bd.bestDaily
+        when bd.bestDaily is null then bw.bestWin
         when bw.bestWin < bd.bestDaily then bw.bestWin
         else bd.bestDaily
       end as value
@@ -605,65 +636,12 @@ export async function listLeaderboardSpeed(
     left join best_win bw on bw.user_id = u.id
     left join best_daily bd on bd.user_id = u.id
     where u.deleted_at is null and u.provider != 'guest'
-      and (bw.bestWin is not null ${isFiltered ? sql`` : sql`or bd.bestDaily is not null`})
+      and (bw.bestWin is not null or bd.bestDaily is not null)
     order by value asc, u.updated_at desc
     limit ${input.limit}
     offset ${offset}
   `);
   return rows;
-}
-
-export async function listLeaderboardStreak(
-  db: AppDb,
-  input: { period: LeaderboardPeriod; limit: number; cursor?: number },
-): Promise<LeaderboardEntryRow[]> {
-  // streak 本质是“到今天为止连续完成天数”，这里取最近 120 天的 daily 记录来计算。
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const from = new Date(today);
-  from.setDate(from.getDate() - 119);
-  const fromKey = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`;
-
-  const rows = await db.all<{
-    userId: string;
-    displayName: string;
-    avatarUrl: string | null;
-    dateKey: string;
-  }>(sql`
-    select
-      u.id as userId,
-      u.display_name as displayName,
-      u.avatar_url as avatarUrl,
-      d.date_key as dateKey
-    from users u
-    inner join user_daily_completions d on d.user_id = u.id
-    where u.deleted_at is null and u.provider != 'guest'
-      and d.date_key >= ${fromKey}
-    order by u.id asc, d.date_key desc
-  `);
-
-  const byUser = new Map<string, { displayName: string; avatarUrl: string | null; keys: string[] }>();
-  for (const r of rows) {
-    const cur = byUser.get(r.userId) ?? { displayName: r.displayName, avatarUrl: r.avatarUrl, keys: [] };
-    cur.keys.push(r.dateKey);
-    byUser.set(r.userId, cur);
-  }
-
-  const scored: LeaderboardEntryRow[] = [];
-  for (const [userId, info] of byUser.entries()) {
-    const streak = computeStreak(info.keys, today);
-    if (streak <= 0) continue;
-    scored.push({
-      userId,
-      displayName: info.displayName,
-      avatarUrl: info.avatarUrl,
-      value: streak,
-    });
-  }
-
-  scored.sort((a, b) => b.value - a.value || a.userId.localeCompare(b.userId));
-  const offset = Math.max(0, input.cursor ?? 0);
-  return scored.slice(offset, offset + input.limit);
 }
 
 export async function deleteUserData(db: AppDb, userId: string) {

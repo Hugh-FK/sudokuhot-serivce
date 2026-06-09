@@ -87,13 +87,14 @@ export const userDailyCompletions = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     dateKey: text('date_key').notNull(),
+    playMode: text('play_mode').notNull().default('classic'),
     difficultyId: text('difficulty_id').notNull(),
     elapsedSeconds: integer('elapsed_seconds').notNull(),
     mistakes: integer('mistakes').notNull(),
     hintsUsed: integer('hints_used').notNull(),
     completedAt: text('completed_at').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.dateKey] })],
+  (t) => [primaryKey({ columns: [t.userId, t.dateKey, t.playMode, t.difficultyId] })],
 );
 
 export const feedbackEntries = sqliteTable('feedback_entries', {

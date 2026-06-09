@@ -39,9 +39,9 @@ var init_wrangler_modules_watch = __esm({
   }
 });
 
-// node_modules/.pnpm/wrangler@4.95.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/modules-watch-stub.js
+// node_modules/.pnpm/wrangler@4.98.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/modules-watch-stub.js
 var init_modules_watch_stub = __esm({
-  "node_modules/.pnpm/wrangler@4.95.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/modules-watch-stub.js"() {
+  "node_modules/.pnpm/wrangler@4.98.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/modules-watch-stub.js"() {
     init_wrangler_modules_watch();
   }
 });
@@ -589,7 +589,7 @@ var require_ieee754 = __commonJS({
   }
 });
 
-// node_modules/.pnpm/@borewit+text-codec@0.2.1/node_modules/@borewit/text-codec/lib/index.js
+// node_modules/.pnpm/@borewit+text-codec@0.2.2/node_modules/@borewit/text-codec/lib/index.js
 function utf8Decoder() {
   if (typeof globalThis.TextDecoder === "undefined")
     return void 0;
@@ -616,52 +616,137 @@ function textDecode(bytes, encoding = "utf-8") {
       throw new RangeError(`Encoding '${encoding}' not supported`);
   }
 }
+function flushChunk(parts, chunk) {
+  if (chunk.length === 0)
+    return;
+  parts.push(String.fromCharCode.apply(null, chunk));
+  chunk.length = 0;
+}
+function pushCodeUnit(parts, chunk, codeUnit) {
+  chunk.push(codeUnit);
+  if (chunk.length >= CHUNK)
+    flushChunk(parts, chunk);
+}
+function pushCodePoint(parts, chunk, cp) {
+  if (cp <= 65535) {
+    pushCodeUnit(parts, chunk, cp);
+    return;
+  }
+  cp -= 65536;
+  pushCodeUnit(parts, chunk, 55296 + (cp >> 10));
+  pushCodeUnit(parts, chunk, 56320 + (cp & 1023));
+}
 function decodeUTF8(bytes) {
   const parts = [];
-  let out = "";
+  const chunk = [];
   let i = 0;
-  while (i < bytes.length) {
-    const b1 = bytes[i++];
-    if (b1 < 128) {
-      out += String.fromCharCode(b1);
-    } else if (b1 < 224) {
-      const b2 = bytes[i++] & 63;
-      out += String.fromCharCode((b1 & 31) << 6 | b2);
-    } else if (b1 < 240) {
-      const b2 = bytes[i++] & 63;
-      const b3 = bytes[i++] & 63;
-      out += String.fromCharCode((b1 & 15) << 12 | b2 << 6 | b3);
-    } else {
-      const b2 = bytes[i++] & 63;
-      const b3 = bytes[i++] & 63;
-      const b4 = bytes[i++] & 63;
-      let cp = (b1 & 7) << 18 | b2 << 12 | b3 << 6 | b4;
-      cp -= 65536;
-      out += String.fromCharCode(55296 + (cp >> 10 & 1023), 56320 + (cp & 1023));
-    }
-    if (out.length >= CHUNK) {
-      parts.push(out);
-      out = "";
-    }
+  if (bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) {
+    i = 3;
   }
-  if (out)
-    parts.push(out);
+  while (i < bytes.length) {
+    const b1 = bytes[i];
+    if (b1 <= 127) {
+      pushCodeUnit(parts, chunk, b1);
+      i++;
+      continue;
+    }
+    if (b1 < 194 || b1 > 244) {
+      pushCodeUnit(parts, chunk, REPLACEMENT);
+      i++;
+      continue;
+    }
+    if (b1 <= 223) {
+      if (i + 1 >= bytes.length) {
+        pushCodeUnit(parts, chunk, REPLACEMENT);
+        i++;
+        continue;
+      }
+      const b22 = bytes[i + 1];
+      if ((b22 & 192) !== 128) {
+        pushCodeUnit(parts, chunk, REPLACEMENT);
+        i++;
+        continue;
+      }
+      const cp2 = (b1 & 31) << 6 | b22 & 63;
+      pushCodeUnit(parts, chunk, cp2);
+      i += 2;
+      continue;
+    }
+    if (b1 <= 239) {
+      if (i + 2 >= bytes.length) {
+        pushCodeUnit(parts, chunk, REPLACEMENT);
+        i++;
+        continue;
+      }
+      const b22 = bytes[i + 1];
+      const b32 = bytes[i + 2];
+      const valid2 = (b22 & 192) === 128 && (b32 & 192) === 128 && !(b1 === 224 && b22 < 160) && // overlong
+      !(b1 === 237 && b22 >= 160);
+      if (!valid2) {
+        pushCodeUnit(parts, chunk, REPLACEMENT);
+        i++;
+        continue;
+      }
+      const cp2 = (b1 & 15) << 12 | (b22 & 63) << 6 | b32 & 63;
+      pushCodeUnit(parts, chunk, cp2);
+      i += 3;
+      continue;
+    }
+    if (i + 3 >= bytes.length) {
+      pushCodeUnit(parts, chunk, REPLACEMENT);
+      i++;
+      continue;
+    }
+    const b2 = bytes[i + 1];
+    const b3 = bytes[i + 2];
+    const b4 = bytes[i + 3];
+    const valid = (b2 & 192) === 128 && (b3 & 192) === 128 && (b4 & 192) === 128 && !(b1 === 240 && b2 < 144) && // overlong
+    !(b1 === 244 && b2 > 143);
+    if (!valid) {
+      pushCodeUnit(parts, chunk, REPLACEMENT);
+      i++;
+      continue;
+    }
+    const cp = (b1 & 7) << 18 | (b2 & 63) << 12 | (b3 & 63) << 6 | b4 & 63;
+    pushCodePoint(parts, chunk, cp);
+    i += 4;
+  }
+  flushChunk(parts, chunk);
   return parts.join("");
 }
 function decodeUTF16LE(bytes) {
-  const len = bytes.length & ~1;
-  if (len === 0)
-    return "";
   const parts = [];
-  const maxUnits = CHUNK;
-  for (let i = 0; i < len; ) {
-    const unitsThis = Math.min(maxUnits, len - i >> 1);
-    const units = new Array(unitsThis);
-    for (let j = 0; j < unitsThis; j++, i += 2) {
-      units[j] = bytes[i] | bytes[i + 1] << 8;
+  const chunk = [];
+  const len = bytes.length;
+  let i = 0;
+  while (i + 1 < len) {
+    const u1 = bytes[i] | bytes[i + 1] << 8;
+    i += 2;
+    if (u1 >= 55296 && u1 <= 56319) {
+      if (i + 1 < len) {
+        const u2 = bytes[i] | bytes[i + 1] << 8;
+        if (u2 >= 56320 && u2 <= 57343) {
+          pushCodeUnit(parts, chunk, u1);
+          pushCodeUnit(parts, chunk, u2);
+          i += 2;
+        } else {
+          pushCodeUnit(parts, chunk, REPLACEMENT);
+        }
+      } else {
+        pushCodeUnit(parts, chunk, REPLACEMENT);
+      }
+      continue;
     }
-    parts.push(String.fromCharCode.apply(null, units));
+    if (u1 >= 56320 && u1 <= 57343) {
+      pushCodeUnit(parts, chunk, REPLACEMENT);
+      continue;
+    }
+    pushCodeUnit(parts, chunk, u1);
   }
+  if (i < len) {
+    pushCodeUnit(parts, chunk, REPLACEMENT);
+  }
+  flushChunk(parts, chunk);
   return parts.join("");
 }
 function decodeASCII(bytes) {
@@ -704,9 +789,9 @@ function decodeWindows1252(bytes) {
     parts.push(out);
   return parts.join("");
 }
-var WINDOWS_1252_EXTRA, WINDOWS_1252_REVERSE, _utf8Decoder, CHUNK;
+var WINDOWS_1252_EXTRA, WINDOWS_1252_REVERSE, _utf8Decoder, CHUNK, REPLACEMENT;
 var init_lib = __esm({
-  "node_modules/.pnpm/@borewit+text-codec@0.2.1/node_modules/@borewit/text-codec/lib/index.js"() {
+  "node_modules/.pnpm/@borewit+text-codec@0.2.2/node_modules/@borewit/text-codec/lib/index.js"() {
     init_modules_watch_stub();
     WINDOWS_1252_EXTRA = {
       128: "\u20AC",
@@ -743,7 +828,11 @@ var init_lib = __esm({
     }
     __name(utf8Decoder, "utf8Decoder");
     CHUNK = 32 * 1024;
+    REPLACEMENT = 65533;
     __name(textDecode, "textDecode");
+    __name(flushChunk, "flushChunk");
+    __name(pushCodeUnit, "pushCodeUnit");
+    __name(pushCodePoint, "pushCodePoint");
     __name(decodeUTF8, "decodeUTF8");
     __name(decodeUTF16LE, "decodeUTF16LE");
     __name(decodeASCII, "decodeASCII");
@@ -849,10 +938,10 @@ var init_lib2 = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/Errors.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/Errors.js
 var defaultMessages, EndOfStreamError, AbortError;
 var init_Errors = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/Errors.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/Errors.js"() {
     init_modules_watch_stub();
     defaultMessages = "End-Of-Stream";
     EndOfStreamError = class extends Error {
@@ -876,17 +965,17 @@ var init_Errors = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/Deferred.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/Deferred.js
 var init_Deferred = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/Deferred.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/Deferred.js"() {
     init_modules_watch_stub();
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/AbstractStreamReader.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/AbstractStreamReader.js
 var AbstractStreamReader;
 var init_AbstractStreamReader = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/AbstractStreamReader.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/AbstractStreamReader.js"() {
     init_modules_watch_stub();
     init_Errors();
     AbstractStreamReader = class {
@@ -958,9 +1047,9 @@ var init_AbstractStreamReader = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/StreamReader.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/StreamReader.js
 var init_StreamReader = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/StreamReader.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/StreamReader.js"() {
     init_modules_watch_stub();
     init_Errors();
     init_Deferred();
@@ -968,10 +1057,10 @@ var init_StreamReader = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamReader.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamReader.js
 var WebStreamReader;
 var init_WebStreamReader = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamReader.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamReader.js"() {
     init_modules_watch_stub();
     init_AbstractStreamReader();
     WebStreamReader = class extends AbstractStreamReader {
@@ -992,10 +1081,10 @@ var init_WebStreamReader = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamByobReader.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamByobReader.js
 var WebStreamByobReader;
 var init_WebStreamByobReader = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamByobReader.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamByobReader.js"() {
     init_modules_watch_stub();
     init_WebStreamReader();
     WebStreamByobReader = class extends WebStreamReader {
@@ -1025,10 +1114,10 @@ var init_WebStreamByobReader = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamDefaultReader.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamDefaultReader.js
 var WebStreamDefaultReader;
 var init_WebStreamDefaultReader = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamDefaultReader.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamDefaultReader.js"() {
     init_modules_watch_stub();
     init_Errors();
     init_AbstractStreamReader();
@@ -1094,7 +1183,7 @@ var init_WebStreamDefaultReader = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamReaderFactory.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamReaderFactory.js
 function makeWebStreamReader(stream) {
   try {
     const reader = stream.getReader({ mode: "byob" });
@@ -1110,7 +1199,7 @@ function makeWebStreamReader(stream) {
   }
 }
 var init_WebStreamReaderFactory = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/WebStreamReaderFactory.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/WebStreamReaderFactory.js"() {
     init_modules_watch_stub();
     init_WebStreamByobReader();
     init_WebStreamDefaultReader();
@@ -1118,9 +1207,9 @@ var init_WebStreamReaderFactory = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/index.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/index.js
 var init_stream = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/stream/index.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/stream/index.js"() {
     init_modules_watch_stub();
     init_Errors();
     init_StreamReader();
@@ -1130,10 +1219,10 @@ var init_stream = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/AbstractTokenizer.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/AbstractTokenizer.js
 var AbstractTokenizer;
 var init_AbstractTokenizer = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/AbstractTokenizer.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/AbstractTokenizer.js"() {
     init_modules_watch_stub();
     init_stream();
     AbstractTokenizer = class {
@@ -1205,10 +1294,13 @@ var init_AbstractTokenizer = __esm({
       }
       /**
        * Ignore number of bytes, advances the pointer in under tokenizer-stream.
-       * @param length - Number of bytes to ignore
+       * @param length - Number of bytes to ignore.  Must be ≥ 0.
        * @return resolves the number of bytes ignored, equals length if this available, otherwise the number of bytes available
        */
       async ignore(length) {
+        if (length < 0) {
+          throw new RangeError("ignore length must be \u2265 0 bytes");
+        }
         if (this.fileInfo.size !== void 0) {
           const bytesLeft = this.fileInfo.size - this.position;
           if (length > bytesLeft) {
@@ -1244,10 +1336,10 @@ var init_AbstractTokenizer = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/ReadStreamTokenizer.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/ReadStreamTokenizer.js
 var maxBufferSize, ReadStreamTokenizer;
 var init_ReadStreamTokenizer = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/ReadStreamTokenizer.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/ReadStreamTokenizer.js"() {
     init_modules_watch_stub();
     init_AbstractTokenizer();
     init_stream();
@@ -1328,7 +1420,13 @@ var init_ReadStreamTokenizer = __esm({
         }
         return bytesRead;
       }
+      /**
+       * @param length Number of bytes to ignore. Must be ≥ 0.
+       */
       async ignore(length) {
+        if (length < 0) {
+          throw new RangeError("ignore length must be \u2265 0 bytes");
+        }
         const bufSize = Math.min(maxBufferSize, length);
         const buf = new Uint8Array(bufSize);
         let totBytesRead = 0;
@@ -1355,10 +1453,10 @@ var init_ReadStreamTokenizer = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/BufferTokenizer.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/BufferTokenizer.js
 var BufferTokenizer;
 var init_BufferTokenizer = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/BufferTokenizer.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/BufferTokenizer.js"() {
     init_modules_watch_stub();
     init_stream();
     init_AbstractTokenizer();
@@ -1418,10 +1516,10 @@ var init_BufferTokenizer = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/BlobTokenizer.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/BlobTokenizer.js
 var BlobTokenizer;
 var init_BlobTokenizer = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/BlobTokenizer.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/BlobTokenizer.js"() {
     init_modules_watch_stub();
     init_stream();
     init_AbstractTokenizer();
@@ -1482,7 +1580,7 @@ var init_BlobTokenizer = __esm({
   }
 });
 
-// node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/core.js
+// node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/core.js
 function fromWebStream(webStream, options) {
   const webStreamReader = makeWebStreamReader(webStream);
   const _options = options ?? {};
@@ -1502,7 +1600,7 @@ function fromBlob(blob2, options) {
   return new BlobTokenizer(blob2, options);
 }
 var init_core = __esm({
-  "node_modules/.pnpm/strtok3@10.3.4/node_modules/strtok3/lib/core.js"() {
+  "node_modules/.pnpm/strtok3@10.3.5/node_modules/strtok3/lib/core.js"() {
     init_modules_watch_stub();
     init_stream();
     init_ReadStreamTokenizer();
@@ -4618,10 +4716,10 @@ var require_dist = __commonJS({
   }
 });
 
-// .wrangler/tmp/bundle-srBDDP/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-9spOHY/middleware-loader.entry.ts
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-srBDDP/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-9spOHY/middleware-insertion-facade.js
 init_modules_watch_stub();
 
 // src/index.ts
@@ -35023,13 +35121,14 @@ var userDailyCompletions = sqliteTable(
   {
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     dateKey: text("date_key").notNull(),
+    playMode: text("play_mode").notNull().default("classic"),
     difficultyId: text("difficulty_id").notNull(),
     elapsedSeconds: integer("elapsed_seconds").notNull(),
     mistakes: integer("mistakes").notNull(),
     hintsUsed: integer("hints_used").notNull(),
     completedAt: text("completed_at").notNull()
   },
-  (t2) => [primaryKey({ columns: [t2.userId, t2.dateKey] })]
+  (t2) => [primaryKey({ columns: [t2.userId, t2.dateKey, t2.playMode, t2.difficultyId] })]
 );
 var feedbackEntries = sqliteTable("feedback_entries", {
   id: text("id").primaryKey(),
@@ -35163,65 +35262,6 @@ function normalizeAuthEmail(email3) {
   return email3.trim().toLowerCase();
 }
 __name(normalizeAuthEmail, "normalizeAuthEmail");
-
-// src/lib/daily-catalog.ts
-init_modules_watch_stub();
-var DAILY_TIP_IDS = [
-  "focusBoxes",
-  "singleCandidate",
-  "pencilMarks",
-  "scanRows",
-  "hiddenSingle",
-  "breathing"
-];
-function toDateKey(date3) {
-  const y = date3.getFullYear();
-  const m = String(date3.getMonth() + 1).padStart(2, "0");
-  const d = String(date3.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-__name(toDateKey, "toDateKey");
-function buildPuzzleSeed(dateKey, difficultyId) {
-  return `daily:${dateKey}:${difficultyId}`;
-}
-__name(buildPuzzleSeed, "buildPuzzleSeed");
-function pickTipId(dateKey) {
-  const date3 = new Date(dateKey.replace(/-/g, "/"));
-  const dayOfYear = Math.floor(
-    (date3.getTime() - new Date(date3.getFullYear(), 0, 0).getTime()) / 864e5
-  );
-  return DAILY_TIP_IDS[dayOfYear % DAILY_TIP_IDS.length] ?? "focusBoxes";
-}
-__name(pickTipId, "pickTipId");
-function getDailyChallengeDefinition(dateKey, reference = /* @__PURE__ */ new Date()) {
-  const difficultyId = "medium";
-  const parsed = new Date(dateKey.replace(/-/g, "/"));
-  const isValid = !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === dateKey;
-  const key = isValid ? dateKey : toDateKey(reference);
-  return {
-    dateKey: key,
-    difficultyId,
-    puzzleSeed: buildPuzzleSeed(key, difficultyId),
-    reward: { type: "badge", id: "sudoku-hot-daily" },
-    tipId: pickTipId(key)
-  };
-}
-__name(getDailyChallengeDefinition, "getDailyChallengeDefinition");
-function computeStreak(dateKeys, reference = /* @__PURE__ */ new Date()) {
-  if (dateKeys.length === 0) return 0;
-  const set = new Set(dateKeys);
-  let streak = 0;
-  const cursor = new Date(reference);
-  cursor.setHours(0, 0, 0, 0);
-  for (; ; ) {
-    const key = toDateKey(cursor);
-    if (!set.has(key)) break;
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
-}
-__name(computeStreak, "computeStreak");
 
 // src/db/repos.ts
 var DEFAULT_SETTINGS = JSON.stringify({
@@ -35451,21 +35491,26 @@ async function listDailyCompletions(db, userId) {
 }
 __name(listDailyCompletions, "listDailyCompletions");
 async function upsertDailyCompletion(db, userId, row) {
-  await db.insert(userDailyCompletions).values({ ...row, userId }).onConflictDoUpdate({
-    target: [userDailyCompletions.userId, userDailyCompletions.dateKey],
-    set: {
-      difficultyId: row.difficultyId,
-      elapsedSeconds: row.elapsedSeconds,
-      mistakes: row.mistakes,
-      hintsUsed: row.hintsUsed,
-      completedAt: row.completedAt
-    }
-  });
+  const existing = await getDailyCompletion(
+    db,
+    userId,
+    row.dateKey,
+    row.playMode ?? "classic",
+    row.difficultyId
+  );
+  if (existing) return "exists";
+  await db.insert(userDailyCompletions).values({ ...row, userId, playMode: row.playMode ?? "classic" });
+  return "inserted";
 }
 __name(upsertDailyCompletion, "upsertDailyCompletion");
-async function getDailyCompletion(db, userId, dateKey) {
+async function getDailyCompletion(db, userId, dateKey, playMode, difficultyId) {
   const rows = await db.select().from(userDailyCompletions).where(
-    and(eq(userDailyCompletions.userId, userId), eq(userDailyCompletions.dateKey, dateKey))
+    and(
+      eq(userDailyCompletions.userId, userId),
+      eq(userDailyCompletions.dateKey, dateKey),
+      eq(userDailyCompletions.playMode, playMode),
+      eq(userDailyCompletions.difficultyId, difficultyId)
+    )
   ).limit(1);
   return rows[0] ?? null;
 }
@@ -35512,34 +35557,51 @@ async function listCommunityStats(db) {
   return db.select().from(difficultyCommunityStats);
 }
 __name(listCommunityStats, "listCommunityStats");
+function formatDateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+__name(formatDateKey, "formatDateKey");
 function computeFromDate(period) {
   if (period === "all") return null;
   const now = /* @__PURE__ */ new Date();
   now.setHours(0, 0, 0, 0);
+  if (period === "today") return formatDateKey(now);
   const days = period === "7d" ? 6 : 29;
   now.setDate(now.getDate() - days);
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return formatDateKey(now);
 }
 __name(computeFromDate, "computeFromDate");
-async function listLeaderboardWins(db, input) {
+function buildDailyWhere(input) {
+  const filters = [];
+  if (input.fromDate) filters.push(sql`date_key >= ${input.fromDate}`);
+  if (input.mode) filters.push(sql`play_mode = ${input.mode}`);
+  if (input.difficultyId) filters.push(sql`difficulty_id = ${input.difficultyId}`);
+  if (filters.length === 0) return sql``;
+  return sql`where ${sql.join(filters, sql` and `)}`;
+}
+__name(buildDailyWhere, "buildDailyWhere");
+async function listLeaderboardPoints(db, input) {
   const fromDate = computeFromDate(input.period);
-  const isFiltered = Boolean(input.mode || input.difficultyId);
   const offset = Math.max(0, input.cursor ?? 0);
+  const dailyWhere = buildDailyWhere({
+    fromDate,
+    mode: input.mode,
+    difficultyId: input.difficultyId
+  });
   const winFilters = [sql`result = 'win'`];
   if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
   if (input.mode) winFilters.push(sql`play_mode = ${input.mode}`);
   if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
   const winWhere = sql`where ${sql.join(winFilters, sql` and `)}`;
-  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
   const rows = await db.all(sql`
     select
       u.id as userId,
       u.display_name as displayName,
       u.avatar_url as avatarUrl,
-      (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) as value
+      (coalesce(w.wins, 0) + coalesce(d.dailies, 0)) as value
     from users u
     left join (
       select user_id, count(*) as wins
@@ -35554,24 +35616,27 @@ async function listLeaderboardWins(db, input) {
       group by user_id
     ) d on d.user_id = u.id
     where u.deleted_at is null and u.provider != 'guest'
-      and (coalesce(w.wins, 0) + ${isFiltered ? sql`0` : sql`coalesce(d.dailies, 0)`}) > 0
+      and (coalesce(w.wins, 0) + coalesce(d.dailies, 0)) > 0
     order by value desc, u.updated_at desc
     limit ${input.limit}
     offset ${offset}
   `);
   return rows;
 }
-__name(listLeaderboardWins, "listLeaderboardWins");
+__name(listLeaderboardPoints, "listLeaderboardPoints");
 async function listLeaderboardSpeed(db, input) {
   const fromDate = computeFromDate(input.period);
-  const isFiltered = Boolean(input.mode || input.difficultyId);
   const offset = Math.max(0, input.cursor ?? 0);
+  const dailyWhere = buildDailyWhere({
+    fromDate,
+    mode: input.mode,
+    difficultyId: input.difficultyId
+  });
   const winFilters = [sql`result = 'win'`];
   if (fromDate) winFilters.push(sql`completed_at >= ${fromDate}`);
   if (input.mode) winFilters.push(sql`play_mode = ${input.mode}`);
   if (input.difficultyId) winFilters.push(sql`difficulty_id = ${input.difficultyId}`);
   const winWhere = sql`where ${sql.join(winFilters, sql` and `)}`;
-  const dailyWhere = fromDate ? sql`where date_key >= ${fromDate}` : sql``;
   const rows = await db.all(sql`
     with best_win as (
       select user_id, min(elapsed_seconds) as bestWin
@@ -35590,8 +35655,8 @@ async function listLeaderboardSpeed(db, input) {
       u.display_name as displayName,
       u.avatar_url as avatarUrl,
       case
-        when bw.bestWin is null then ${isFiltered ? sql`null` : sql`bd.bestDaily`}
-        when ${isFiltered ? sql`true` : sql`bd.bestDaily is null`} then bw.bestWin
+        when bw.bestWin is null then bd.bestDaily
+        when bd.bestDaily is null then bw.bestWin
         when bw.bestWin < bd.bestDaily then bw.bestWin
         else bd.bestDaily
       end as value
@@ -35599,7 +35664,7 @@ async function listLeaderboardSpeed(db, input) {
     left join best_win bw on bw.user_id = u.id
     left join best_daily bd on bd.user_id = u.id
     where u.deleted_at is null and u.provider != 'guest'
-      and (bw.bestWin is not null ${isFiltered ? sql`` : sql`or bd.bestDaily is not null`})
+      and (bw.bestWin is not null or bd.bestDaily is not null)
     order by value asc, u.updated_at desc
     limit ${input.limit}
     offset ${offset}
@@ -35607,46 +35672,6 @@ async function listLeaderboardSpeed(db, input) {
   return rows;
 }
 __name(listLeaderboardSpeed, "listLeaderboardSpeed");
-async function listLeaderboardStreak(db, input) {
-  const today = /* @__PURE__ */ new Date();
-  today.setHours(0, 0, 0, 0);
-  const from = new Date(today);
-  from.setDate(from.getDate() - 119);
-  const fromKey = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
-  const rows = await db.all(sql`
-    select
-      u.id as userId,
-      u.display_name as displayName,
-      u.avatar_url as avatarUrl,
-      d.date_key as dateKey
-    from users u
-    inner join user_daily_completions d on d.user_id = u.id
-    where u.deleted_at is null and u.provider != 'guest'
-      and d.date_key >= ${fromKey}
-    order by u.id asc, d.date_key desc
-  `);
-  const byUser = /* @__PURE__ */ new Map();
-  for (const r of rows) {
-    const cur = byUser.get(r.userId) ?? { displayName: r.displayName, avatarUrl: r.avatarUrl, keys: [] };
-    cur.keys.push(r.dateKey);
-    byUser.set(r.userId, cur);
-  }
-  const scored = [];
-  for (const [userId, info] of byUser.entries()) {
-    const streak = computeStreak(info.keys, today);
-    if (streak <= 0) continue;
-    scored.push({
-      userId,
-      displayName: info.displayName,
-      avatarUrl: info.avatarUrl,
-      value: streak
-    });
-  }
-  scored.sort((a, b) => b.value - a.value || a.userId.localeCompare(b.userId));
-  const offset = Math.max(0, input.cursor ?? 0);
-  return scored.slice(offset, offset + input.limit);
-}
-__name(listLeaderboardStreak, "listLeaderboardStreak");
 async function deleteUserData(db, userId) {
   const now = isoNow();
   await db.delete(authSessions).where(eq(authSessions.userId, userId));
@@ -35659,6 +35684,83 @@ async function deleteUserData(db, userId) {
   await db.update(users).set({ deletedAt: now, updatedAt: now }).where(eq(users.id, userId));
 }
 __name(deleteUserData, "deleteUserData");
+
+// src/lib/daily-catalog.ts
+init_modules_watch_stub();
+var DAILY_TIP_IDS = [
+  "focusBoxes",
+  "singleCandidate",
+  "pencilMarks",
+  "scanRows",
+  "hiddenSingle",
+  "breathing"
+];
+function toDateKey(date3) {
+  const y = date3.getFullYear();
+  const m = String(date3.getMonth() + 1).padStart(2, "0");
+  const d = String(date3.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+__name(toDateKey, "toDateKey");
+function buildPuzzleSeedV2(dateKey, mode, difficultyId) {
+  return `daily:${dateKey}:${mode}:${difficultyId}`;
+}
+__name(buildPuzzleSeedV2, "buildPuzzleSeedV2");
+function pickTipId(dateKey) {
+  const date3 = new Date(dateKey.replace(/-/g, "/"));
+  const dayOfYear = Math.floor(
+    (date3.getTime() - new Date(date3.getFullYear(), 0, 0).getTime()) / 864e5
+  );
+  return DAILY_TIP_IDS[dayOfYear % DAILY_TIP_IDS.length] ?? "focusBoxes";
+}
+__name(pickTipId, "pickTipId");
+function parsePlayMode(raw) {
+  return raw === "hell" ? "hell" : "classic";
+}
+__name(parsePlayMode, "parsePlayMode");
+function parseDifficultyId(raw) {
+  const ids = ["easy", "medium", "hard", "expert", "master"];
+  return ids.includes(raw) ? raw : "medium";
+}
+__name(parseDifficultyId, "parseDifficultyId");
+function getDailyChallengeDefinitionV2(dateKey, selection, reference = /* @__PURE__ */ new Date()) {
+  const parsed = new Date(dateKey.replace(/-/g, "/"));
+  const isValid = !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === dateKey;
+  const key = isValid ? dateKey : toDateKey(reference);
+  const mode = parsePlayMode(selection.mode);
+  const difficultyId = parseDifficultyId(selection.difficultyId);
+  return {
+    dateKey: key,
+    mode,
+    difficultyId,
+    puzzleSeed: buildPuzzleSeedV2(key, mode, difficultyId),
+    reward: { type: "badge", id: "sudoku-hot-daily" },
+    tipId: pickTipId(key)
+  };
+}
+__name(getDailyChallengeDefinitionV2, "getDailyChallengeDefinitionV2");
+function parseDailyChallengeQuery(query) {
+  return {
+    mode: parsePlayMode(query.mode),
+    difficultyId: parseDifficultyId(query.difficulty)
+  };
+}
+__name(parseDailyChallengeQuery, "parseDailyChallengeQuery");
+function computeStreak(dateKeys, reference = /* @__PURE__ */ new Date()) {
+  if (dateKeys.length === 0) return 0;
+  const set = new Set(dateKeys);
+  let streak = 0;
+  const cursor = new Date(reference);
+  cursor.setHours(0, 0, 0, 0);
+  for (; ; ) {
+    const key = toDateKey(cursor);
+    if (!set.has(key)) break;
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+__name(computeStreak, "computeStreak");
 
 // src/services/aggregates.ts
 init_modules_watch_stub();
@@ -35699,19 +35801,28 @@ function buildSummary(completions, daily, reference = /* @__PURE__ */ new Date()
   const winCount = wins.length + daily.length;
   let bestWinSeconds = null;
   let bestWinDifficulty = null;
+  let totalPlaySeconds = 0;
+  let timedGames = 0;
   for (const c of wins) {
-    if (bestWinSeconds === null || c.elapsedSeconds < bestWinSeconds) {
-      bestWinSeconds = c.elapsedSeconds;
+    const elapsed = c.elapsedSeconds;
+    if (elapsed <= 0) continue;
+    totalPlaySeconds += elapsed;
+    timedGames += 1;
+    if (bestWinSeconds === null || elapsed < bestWinSeconds) {
+      bestWinSeconds = elapsed;
       bestWinDifficulty = c.difficultyId;
     }
   }
   for (const d of daily) {
-    if (bestWinSeconds === null || d.elapsedSeconds < bestWinSeconds) {
-      bestWinSeconds = d.elapsedSeconds;
+    const elapsed = d.elapsedSeconds;
+    if (elapsed <= 0) continue;
+    totalPlaySeconds += elapsed;
+    timedGames += 1;
+    if (bestWinSeconds === null || elapsed < bestWinSeconds) {
+      bestWinSeconds = elapsed;
       bestWinDifficulty = d.difficultyId;
     }
   }
-  const totalPlaySeconds = completions.reduce((s, c) => s + c.elapsedSeconds, 0) + daily.reduce((s, d) => s + d.elapsedSeconds, 0);
   const winRate = totalGames > 0 ? Math.round(winCount / totalGames * 1e3) / 10 : 0;
   return {
     totalGames,
@@ -35722,7 +35833,8 @@ function buildSummary(completions, daily, reference = /* @__PURE__ */ new Date()
     bestWinSeconds,
     bestWinDifficulty,
     dailyStreak: computeStreak(dailyKeys, reference),
-    dailyCompletions: daily.length
+    dailyCompletions: daily.length,
+    timedGames
   };
 }
 __name(buildSummary, "buildSummary");
@@ -35739,7 +35851,7 @@ function buildDerivedStats(completions, daily, period, reference = /* @__PURE__ 
       useLiveData: false,
       totalGames: "0",
       winRate: 0,
-      avgTime: "00:00",
+      avgTime: "\u2014",
       bestTime: "\u2014",
       bestTimeDifficulty: "medium",
       accuracy: "\u2014",
@@ -35752,7 +35864,8 @@ function buildDerivedStats(completions, daily, period, reference = /* @__PURE__ 
   const totalGames = usePeriod ? periodSummary.totalGames : global.totalGames;
   const winRate = usePeriod ? periodSummary.winRate : global.winRate;
   const totalPlaySeconds = usePeriod ? periodSummary.totalPlaySeconds : global.totalPlaySeconds;
-  const avgSeconds = totalGames > 0 ? Math.round(totalPlaySeconds / totalGames) : 0;
+  const timedGames = usePeriod ? periodSummary.timedGames : global.timedGames;
+  const avgSeconds = timedGames > 0 ? Math.round(totalPlaySeconds / timedGames) : 0;
   const finished = filteredCompletions.filter((c) => c.result === "win" || c.result === "loss");
   let accuracy = "\u2014";
   if (finished.length > 0) {
@@ -35767,8 +35880,8 @@ function buildDerivedStats(completions, daily, period, reference = /* @__PURE__ 
     useLiveData: true,
     totalGames: String(totalGames),
     winRate,
-    avgTime: formatTime(avgSeconds),
-    bestTime: bestSeconds !== null ? formatTime(bestSeconds) : "\u2014",
+    avgTime: timedGames > 0 ? formatTime(avgSeconds) : "\u2014",
+    bestTime: bestSeconds !== null && bestSeconds > 0 ? formatTime(bestSeconds) : "\u2014",
     bestTimeDifficulty: bestDiff ?? "medium",
     accuracy,
     streakDays: global.dailyStreak,
@@ -35876,6 +35989,31 @@ var ACHIEVEMENT_CATEGORIES = [
 ];
 
 // src/services/achievement-hall.ts
+function normalizeElapsedSeconds(value) {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return value;
+}
+__name(normalizeElapsedSeconds, "normalizeElapsedSeconds");
+function dailyCompletionAsWin(d) {
+  return {
+    id: `daily-${d.userId}-${d.dateKey}-${d.playMode}-${d.difficultyId}`,
+    userId: d.userId,
+    playMode: d.playMode,
+    difficultyId: d.difficultyId,
+    dailyDateKey: d.dateKey,
+    result: "win",
+    elapsedSeconds: normalizeElapsedSeconds(d.elapsedSeconds),
+    mistakes: d.mistakes,
+    hintsUsed: d.hintsUsed,
+    completedAt: d.completedAt
+  };
+}
+__name(dailyCompletionAsWin, "dailyCompletionAsWin");
+function allAchievementWins(completions, daily) {
+  const gameWins = completions.filter((c) => c.result === "win").map((c) => ({ ...c, elapsedSeconds: normalizeElapsedSeconds(c.elapsedSeconds) }));
+  return [...gameWins, ...daily.map(dailyCompletionAsWin)];
+}
+__name(allAchievementWins, "allAchievementWins");
 function countHardWinsNoHints(wins) {
   return wins.filter((c) => c.difficultyId === "hard" && c.hintsUsed === 0).length;
 }
@@ -35984,17 +36122,23 @@ function buildRecent(wins, summary, daily) {
       completedAt: lastDaily?.completedAt ?? (/* @__PURE__ */ new Date()).toISOString()
     });
   }
-  const speedWin = [...wins].filter((c) => c.elapsedSeconds <= 180).sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
-  if (speedWin) {
-    items.push({ achievementId: "speedDemon", icon: "timer", iconTone: "blue", completedAt: speedWin.completedAt });
+  if (evaluate("speedDemon", wins, summary).unlocked) {
+    const speedWin = [...wins].filter((c) => c.elapsedSeconds <= 180).sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
+    if (speedWin) {
+      items.push({ achievementId: "speedDemon", icon: "timer", iconTone: "blue", completedAt: speedWin.completedAt });
+    }
   }
-  const hardWin = [...wins].filter((c) => c.difficultyId === "hard" && c.hintsUsed === 0).sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
-  if (hardWin) {
-    items.push({ achievementId: "masterOfLogic", icon: "stars", iconTone: "yellow", completedAt: hardWin.completedAt });
+  if (evaluate("masterOfLogic", wins, summary).unlocked) {
+    const hardWin = [...wins].filter((c) => c.difficultyId === "hard" && c.hintsUsed === 0).sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
+    if (hardWin) {
+      items.push({ achievementId: "masterOfLogic", icon: "stars", iconTone: "yellow", completedAt: hardWin.completedAt });
+    }
   }
-  const hellWin = [...wins].filter((c) => c.playMode === "hell").sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
-  if (hellWin && items.length < 3) {
-    items.push({ achievementId: "killerKing", icon: "skull", iconTone: "yellow", completedAt: hellWin.completedAt });
+  if (evaluate("killerKing", wins, summary).unlocked) {
+    const hellWin = [...wins].filter((c) => c.playMode === "hell").sort((a, b) => b.completedAt.localeCompare(a.completedAt))[0];
+    if (hellWin) {
+      items.push({ achievementId: "killerKing", icon: "skull", iconTone: "yellow", completedAt: hellWin.completedAt });
+    }
   }
   return items.sort((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 3);
 }
@@ -36020,7 +36164,7 @@ function buildAchievementHallView(completions, daily) {
       categories: categories2
     };
   }
-  const wins = completions.filter((c) => c.result === "win");
+  const wins = allAchievementWins(completions, daily);
   const categories = ACHIEVEMENT_CATEGORIES.map((cat) => ({
     id: cat.id,
     achievements: cat.achievements.map((base) => mergeCard(base, evaluate(base.id, wins, summary)))
@@ -36053,7 +36197,7 @@ function buildAchievementHallView(completions, daily) {
 __name(buildAchievementHallView, "buildAchievementHallView");
 function buildStatsAchievementUnlocks(completions, daily) {
   const summary = buildSummary(completions, daily);
-  const wins = completions.filter((c) => c.result === "win");
+  const wins = allAchievementWins(completions, daily);
   const hasLive = summary.totalGames > 0;
   if (!hasLive) {
     return {
@@ -36525,6 +36669,7 @@ __name(completionToApi, "completionToApi");
 function dailyToApi(row) {
   return {
     dateKey: row.dateKey,
+    mode: row.playMode,
     difficultyId: row.difficultyId,
     elapsedSeconds: row.elapsedSeconds,
     mistakes: row.mistakes,
@@ -36810,24 +36955,25 @@ function createV1Routes(d1, cfEnv) {
   ).get(
     "/leaderboards",
     async ({ query, set }) => {
-      const type = query.type;
+      const typeRaw = query.type;
+      const type = typeRaw === "points" || typeRaw === "wins" ? "points" : typeRaw === "speed" ? "speed" : null;
       const period = query.period ?? "all";
       const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50)));
       const cursor = Math.max(0, Number(query.cursor ?? 0) || 0);
       const modeRaw = query.mode;
       const difficultyIdRaw = query.difficultyId;
-      if (type !== "wins" && type !== "streak" && type !== "speed") {
+      if (!type) {
         set.status = 400;
         return { error: "invalid_type" };
       }
-      if (period !== "all" && period !== "30d" && period !== "7d") {
+      if (period !== "all" && period !== "30d" && period !== "7d" && period !== "today") {
         set.status = 400;
         return { error: "invalid_period" };
       }
-      const mode = modeRaw === "classic" || modeRaw === "hell" ? modeRaw : type === "streak" ? void 0 : "hell";
-      const difficultyId = difficultyIdRaw && ["easy", "medium", "hard", "expert", "master"].includes(difficultyIdRaw) ? difficultyIdRaw : type === "streak" ? void 0 : "master";
+      const mode = modeRaw === "classic" || modeRaw === "hell" ? modeRaw : "hell";
+      const difficultyId = difficultyIdRaw && ["easy", "medium", "hard", "expert", "master"].includes(difficultyIdRaw) ? difficultyIdRaw : "master";
       const pageSize = limit + 1;
-      const rows = type === "wins" ? await listLeaderboardWins(db, { period, limit: pageSize, cursor, mode, difficultyId }) : type === "speed" ? await listLeaderboardSpeed(db, { period, limit: pageSize, cursor, mode, difficultyId }) : await listLeaderboardStreak(db, { period, limit: pageSize, cursor });
+      const rows = type === "points" ? await listLeaderboardPoints(db, { period, limit: pageSize, cursor, mode, difficultyId }) : await listLeaderboardSpeed(db, { period, limit: pageSize, cursor, mode, difficultyId });
       const visible = rows.filter((r) => r.value > 0);
       const hasMore = visible.length > limit;
       const slice = visible.slice(0, limit);
@@ -37009,10 +37155,17 @@ function createV1Routes(d1, cfEnv) {
         hintsUsed: t.Number()
       })
     }
-  ).get("/daily/challenges/:dateKey", async ({ params, request }) => {
+  ).get("/daily/challenges/:dateKey", async ({ params, query, request }) => {
     const user = await requireUser(request.headers.get("authorization") ?? void 0);
-    const definition = getDailyChallengeDefinition(params.dateKey);
-    const completion = await getDailyCompletion(db, user.id, definition.dateKey);
+    const selection = parseDailyChallengeQuery(query);
+    const definition = getDailyChallengeDefinitionV2(params.dateKey, selection);
+    const completion = await getDailyCompletion(
+      db,
+      user.id,
+      definition.dateKey,
+      definition.mode,
+      definition.difficultyId
+    );
     const daily = await listDailyCompletions(db, user.id);
     return {
       definition,
@@ -37025,9 +37178,26 @@ function createV1Routes(d1, cfEnv) {
     "/daily/completions",
     async ({ body, request }) => {
       const user = await requireUser(request.headers.get("authorization") ?? void 0);
+      const playMode = body.playMode === "hell" ? "hell" : "classic";
+      const existing = await getDailyCompletion(
+        db,
+        user.id,
+        body.dateKey,
+        playMode,
+        body.difficultyId
+      );
+      if (existing) {
+        return {
+          ok: true,
+          alreadyCompleted: true,
+          completedAt: existing.completedAt,
+          completion: dailyToApi(existing)
+        };
+      }
       const completedAt = isoNow();
       await upsertDailyCompletion(db, user.id, {
         dateKey: body.dateKey,
+        playMode,
         difficultyId: body.difficultyId,
         elapsedSeconds: body.elapsedSeconds,
         mistakes: body.mistakes,
@@ -37035,11 +37205,12 @@ function createV1Routes(d1, cfEnv) {
         completedAt
       });
       await deleteGameSession(db, user.id);
-      return { ok: true, completedAt };
+      return { ok: true, alreadyCompleted: false, completedAt };
     },
     {
       body: t.Object({
         dateKey: t.String(),
+        playMode: t.Optional(t.Union([t.Literal("classic"), t.Literal("hell")])),
         difficultyId: t.String(),
         elapsedSeconds: t.Number(),
         mistakes: t.Number(),
@@ -37224,7 +37395,7 @@ function buildApp() {
 __name(buildApp, "buildApp");
 var src_default = buildApp();
 
-// node_modules/.pnpm/wrangler@4.95.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts
+// node_modules/.pnpm/wrangler@4.98.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts
 init_modules_watch_stub();
 var drainBody = /* @__PURE__ */ __name(async (request, env4, _ctx, middlewareCtx) => {
   try {
@@ -37243,7 +37414,7 @@ var drainBody = /* @__PURE__ */ __name(async (request, env4, _ctx, middlewareCtx
 }, "drainBody");
 var middleware_ensure_req_body_drained_default = drainBody;
 
-// node_modules/.pnpm/wrangler@4.95.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/middleware/middleware-miniflare3-json-error.ts
+// node_modules/.pnpm/wrangler@4.98.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/middleware/middleware-miniflare3-json-error.ts
 init_modules_watch_stub();
 function reduceError(e) {
   return {
@@ -37267,14 +37438,14 @@ var jsonError = /* @__PURE__ */ __name(async (request, env4, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-srBDDP/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-9spOHY/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
 ];
 var middleware_insertion_facade_default = src_default;
 
-// node_modules/.pnpm/wrangler@4.95.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/middleware/common.ts
+// node_modules/.pnpm/wrangler@4.98.0_@cloudflare+workers-types@4.20260531.1/node_modules/wrangler/templates/middleware/common.ts
 init_modules_watch_stub();
 var __facade_middleware__ = [];
 function __facade_register__(...args) {
@@ -37300,7 +37471,7 @@ function __facade_invoke__(request, env4, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-srBDDP/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-9spOHY/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

@@ -1,6 +1,7 @@
 /** 与前端 daily-challenge/catalog.ts 规则保持一致 */
 
 export type DifficultyId = 'easy' | 'medium' | 'hard' | 'expert' | 'master';
+export type DailyPlayMode = 'classic' | 'hell';
 
 const DAILY_TIP_IDS = [
   'focusBoxes',
@@ -10,6 +11,8 @@ const DAILY_TIP_IDS = [
   'hiddenSingle',
   'breathing',
 ] as const;
+
+const PLAY_MODES: DailyPlayMode[] = ['classic', 'hell'];
 
 export function toDateKey(date: Date): string {
   const y = date.getFullYear();
@@ -22,6 +25,14 @@ export function buildPuzzleSeed(dateKey: string, difficultyId: DifficultyId): st
   return `daily:${dateKey}:${difficultyId}`;
 }
 
+export function buildPuzzleSeedV2(
+  dateKey: string,
+  mode: DailyPlayMode,
+  difficultyId: DifficultyId,
+): string {
+  return `daily:${dateKey}:${mode}:${difficultyId}`;
+}
+
 function pickTipId(dateKey: string): string {
   const date = new Date(dateKey.replace(/-/g, '/'));
   const dayOfYear = Math.floor(
@@ -30,18 +41,47 @@ function pickTipId(dateKey: string): string {
   return DAILY_TIP_IDS[dayOfYear % DAILY_TIP_IDS.length] ?? 'focusBoxes';
 }
 
+function parsePlayMode(raw: string | undefined): DailyPlayMode {
+  return raw === 'hell' ? 'hell' : 'classic';
+}
+
+function parseDifficultyId(raw: string | undefined): DifficultyId {
+  const ids: DifficultyId[] = ['easy', 'medium', 'hard', 'expert', 'master'];
+  return ids.includes(raw as DifficultyId) ? (raw as DifficultyId) : 'medium';
+}
+
 export function getDailyChallengeDefinition(dateKey: string, reference = new Date()) {
-  const difficultyId: DifficultyId = 'medium';
+  return getDailyChallengeDefinitionV2(dateKey, { mode: 'classic', difficultyId: 'medium' }, reference);
+}
+
+export function getDailyChallengeDefinitionV2(
+  dateKey: string,
+  selection: { mode: DailyPlayMode; difficultyId: DifficultyId },
+  reference = new Date(),
+) {
   const parsed = new Date(dateKey.replace(/-/g, '/'));
   const isValid = !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === dateKey;
   const key = isValid ? dateKey : toDateKey(reference);
+  const mode = parsePlayMode(selection.mode);
+  const difficultyId = parseDifficultyId(selection.difficultyId);
 
   return {
     dateKey: key,
+    mode,
     difficultyId,
-    puzzleSeed: buildPuzzleSeed(key, difficultyId),
+    puzzleSeed: buildPuzzleSeedV2(key, mode, difficultyId),
     reward: { type: 'badge' as const, id: 'sudoku-hot-daily' },
     tipId: pickTipId(key),
+  };
+}
+
+export function parseDailyChallengeQuery(query: {
+  mode?: string;
+  difficulty?: string;
+}): { mode: DailyPlayMode; difficultyId: DifficultyId } {
+  return {
+    mode: parsePlayMode(query.mode),
+    difficultyId: parseDifficultyId(query.difficulty),
   };
 }
 
@@ -59,3 +99,5 @@ export function computeStreak(dateKeys: string[], reference = new Date()): numbe
   }
   return streak;
 }
+
+export { PLAY_MODES };

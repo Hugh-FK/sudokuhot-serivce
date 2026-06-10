@@ -57,6 +57,8 @@ export const gameSessions = sqliteTable('game_sessions', {
   dailyDateKey: text('daily_date_key'),
   puzzleTemplateJson: text('puzzle_template_json').notNull(),
   solutionJson: text('solution_json').notNull(),
+  /** hell（killer）模式的笼子数据；classic 会话为 null */
+  cagesJson: text('cages_json'),
   gridJson: text('grid_json').notNull(),
   notesJson: text('notes_json').notNull(),
   mistakes: integer('mistakes').notNull().default(0),

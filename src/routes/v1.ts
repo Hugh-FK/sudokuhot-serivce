@@ -552,7 +552,6 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
           mistakeLimit: t.Union([
             t.Literal('3'),
             t.Literal('5'),
-            t.Literal('10'),
             t.Literal('unlimited'),
           ]),
           highlightMatching: t.Boolean(),

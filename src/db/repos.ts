@@ -18,7 +18,7 @@ import { normalizeAuthEmail } from '../lib/email';
 export type { AppDb };
 
 const DEFAULT_SETTINGS = JSON.stringify({
-  mistakeLimit: '10',
+  mistakeLimit: '5',
   highlightMatching: true,
   highlightRelated: true,
   showTimer: true,

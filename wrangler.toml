@@ -14,7 +14,7 @@ ALLOWED_ORIGINS = "https://sudokuhot.com,https://www.sudokuhot.com,http://sudoku
 [[d1_databases]]
 binding = "DB"
 database_name = "sudokuhot-db"
-database_id = "0caef6ee-6b1f-47bf-918a-e723b3baf68e"
+database_id = "326f88af-40a1-4b42-bca6-33624c15b5ed"
 migrations_dir = "migrations"
 
 [observability.logs]

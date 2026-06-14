@@ -29,6 +29,6 @@ pnpm exec wrangler d1 export "$DB_NAME" --remote --output "$FILE"
 
 R2_KEY="${R2_PREFIX}/$(basename "$FILE")"
 echo "Uploading to r2://${R2_BUCKET}/${R2_KEY}"
-pnpm exec wrangler r2 object put "${R2_BUCKET}/${R2_KEY}" --file "$FILE"
+pnpm exec wrangler r2 object put "${R2_BUCKET}/${R2_KEY}" --file "$FILE" --remote
 
 echo "Done: r2://${R2_BUCKET}/${R2_KEY}"

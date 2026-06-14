@@ -16,6 +16,7 @@ import {
   getUserByEmail,
   getUserById,
   insertCompletion,
+  insertAnonymousPlayEvent,
   insertFeedback,
   listAllFeedback,
   listLeaderboardPoints,
@@ -66,6 +67,13 @@ import {
   normalizeAuthEmail,
   registerWithPassword,
 } from '../services/password-auth';
+import { buildAnonymousPlayStatsSummary } from '../services/anonymous-play-stats';
+import {
+  countryFromRequest,
+  parseDifficultyId,
+  parsePlayMode,
+  parsePlayStatsPeriod,
+} from '../lib/play-stats';
 
 const authPasswordBody = t.String({ minLength: 8, maxLength: 128 });
 const authEmailBody = t.String({ format: 'email', maxLength: 255 });
@@ -177,6 +185,10 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
       if (error instanceof Error && error.message.startsWith('GOOGLE_')) {
         set.status = 400;
         return { error: 'google_oauth_failed' };
+      }
+      if (error instanceof Error && error.message === 'INVALID_PLAY_STATS') {
+        set.status = 400;
+        return { error: 'invalid_play_stats' };
       }
       console.error(error);
       set.status = 500;
@@ -471,6 +483,52 @@ export function createV1Routes(d1: D1Database, cfEnv: Env) {
           limit: t.Optional(t.Union([t.String(), t.Number()])),
           cursor: t.Optional(t.String()),
           mode: t.Optional(t.String()),
+          difficultyId: t.Optional(t.String()),
+        }),
+      },
+    )
+    .post(
+      '/stats/play-events',
+      async ({ body, request }) => {
+        const playMode = parsePlayMode(body.playMode);
+        const difficultyId = parseDifficultyId(body.difficultyId);
+        if (!playMode || !difficultyId) {
+          throw new Error('INVALID_PLAY_STATS');
+        }
+        const completedAt = body.completedAt?.trim() || isoNow();
+        const country = countryFromRequest(request.headers);
+        const row = await insertAnonymousPlayEvent(db, {
+          playMode,
+          difficultyId,
+          completedAt,
+          country,
+        });
+        return row;
+      },
+      {
+        body: t.Object({
+          playMode: t.Union([t.Literal('classic'), t.Literal('hell')]),
+          difficultyId: t.String(),
+          completedAt: t.Optional(t.String()),
+        }),
+      },
+    )
+    .get(
+      '/stats/play-events/summary',
+      async ({ query }) => {
+        const period = parsePlayStatsPeriod(query.period);
+        const playModeRaw = query.playMode?.trim();
+        const difficultyRaw = query.difficultyId?.trim();
+        const playMode = playModeRaw ? parsePlayMode(playModeRaw) : null;
+        const difficultyId = difficultyRaw ? parseDifficultyId(difficultyRaw) : null;
+        if (playModeRaw && !playMode) throw new Error('INVALID_PLAY_STATS');
+        if (difficultyRaw && !difficultyId) throw new Error('INVALID_PLAY_STATS');
+        return buildAnonymousPlayStatsSummary(db, period, { playMode, difficultyId });
+      },
+      {
+        query: t.Object({
+          period: t.Optional(t.String()),
+          playMode: t.Optional(t.String()),
           difficultyId: t.Optional(t.String()),
         }),
       },

@@ -1,6 +1,7 @@
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, gte, isNull, sql } from 'drizzle-orm';
 import type { AppDb } from './index';
 import {
+  anonymousPlayEvents,
   authSessions,
   blogBookmarks,
   difficultyCommunityStats,
@@ -657,4 +658,85 @@ export async function deleteUserData(db: AppDb, userId: string) {
     .update(users)
     .set({ deletedAt: now, updatedAt: now })
     .where(eq(users.id, userId));
+}
+
+export async function insertAnonymousPlayEvent(
+  db: AppDb,
+  input: {
+    playMode: string;
+    difficultyId: string;
+    completedAt: string;
+    country: string;
+  },
+) {
+  const id = newId();
+  const now = isoNow();
+  await db.insert(anonymousPlayEvents).values({
+    id,
+    playMode: input.playMode,
+    difficultyId: input.difficultyId,
+    completedAt: input.completedAt,
+    country: input.country,
+    createdAt: now,
+  });
+  return { id, completedAt: input.completedAt, country: input.country };
+}
+
+export type AnonymousPlayStatsFilters = {
+  since: string | null;
+  playMode?: string | null;
+  difficultyId?: string | null;
+};
+
+function anonymousPlayEventsWhere(filters: AnonymousPlayStatsFilters) {
+  const parts = [];
+  if (filters.since) parts.push(gte(anonymousPlayEvents.completedAt, filters.since));
+  if (filters.playMode) parts.push(eq(anonymousPlayEvents.playMode, filters.playMode));
+  if (filters.difficultyId) parts.push(eq(anonymousPlayEvents.difficultyId, filters.difficultyId));
+  if (parts.length === 0) return undefined;
+  if (parts.length === 1) return parts[0];
+  return and(...parts);
+}
+
+export async function aggregateAnonymousPlayStats(db: AppDb, filters: AnonymousPlayStatsFilters) {
+  const where = anonymousPlayEventsWhere(filters);
+
+  const [totalRow] = await db.select({ count: count() }).from(anonymousPlayEvents).where(where);
+
+  const byMode = await db
+    .select({ playMode: anonymousPlayEvents.playMode, count: count() })
+    .from(anonymousPlayEvents)
+    .where(where)
+    .groupBy(anonymousPlayEvents.playMode);
+
+  const byDifficulty = await db
+    .select({ difficultyId: anonymousPlayEvents.difficultyId, count: count() })
+    .from(anonymousPlayEvents)
+    .where(where)
+    .groupBy(anonymousPlayEvents.difficultyId);
+
+  const byCountry = await db
+    .select({ country: anonymousPlayEvents.country, count: count() })
+    .from(anonymousPlayEvents)
+    .where(where)
+    .groupBy(anonymousPlayEvents.country)
+    .orderBy(desc(count()));
+
+  const byDay = await db
+    .select({
+      date: sql<string>`substr(${anonymousPlayEvents.completedAt}, 1, 10)`.as('date'),
+      count: count(),
+    })
+    .from(anonymousPlayEvents)
+    .where(where)
+    .groupBy(sql`substr(${anonymousPlayEvents.completedAt}, 1, 10)`)
+    .orderBy(sql`substr(${anonymousPlayEvents.completedAt}, 1, 10)`);
+
+  return {
+    total: totalRow?.count ?? 0,
+    byMode,
+    byDifficulty,
+    byCountry,
+    byDay,
+  };
 }

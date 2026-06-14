@@ -126,3 +126,13 @@ export const difficultyCommunityStats = sqliteTable('difficulty_community_stats'
   avgWinHeightPct: integer('avg_win_height_pct').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/** 不记名对局完成统计（无需登录） */
+export const anonymousPlayEvents = sqliteTable('anonymous_play_events', {
+  id: text('id').primaryKey(),
+  playMode: text('play_mode').notNull(),
+  difficultyId: text('difficulty_id').notNull(),
+  completedAt: text('completed_at').notNull(),
+  country: text('country').notNull().default('XX'),
+  createdAt: text('created_at').notNull(),
+});

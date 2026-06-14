@@ -31,4 +31,15 @@ R2_KEY="${R2_PREFIX}/$(basename "$FILE")"
 echo "Uploading to r2://${R2_BUCKET}/${R2_KEY}"
 pnpm exec wrangler r2 object put "${R2_BUCKET}/${R2_KEY}" --file "$FILE" --remote
 
+echo "Verifying remote object exists..."
+VERIFY="/tmp/r2-verify-$$.sql"
+pnpm exec wrangler r2 object get "${R2_BUCKET}/${R2_KEY}" --remote --file "$VERIFY"
+if [ ! -s "$VERIFY" ]; then
+  echo "ERROR: Upload reported success but remote object is missing or empty." >&2
+  exit 1
+fi
+rm -f "$VERIFY"
+
+FILE_SIZE=$(wc -c < "$FILE" | tr -d ' ')
+echo "Local export size: ${FILE_SIZE} bytes"
 echo "Done: r2://${R2_BUCKET}/${R2_KEY}"

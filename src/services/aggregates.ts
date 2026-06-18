@@ -38,15 +38,20 @@ export function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+function regularCompletions(completions: CompletionRow[]) {
+  return completions.filter((c) => !c.dailyDateKey);
+}
+
 export function buildSummary(
   completions: CompletionRow[],
   daily: DailyCompletionRow[],
   reference = new Date(),
 ) {
   const dailyKeys = daily.map((d) => d.dateKey);
-  const wins = completions.filter((c) => c.result === 'win');
-  const losses = completions.filter((c) => c.result === 'loss');
-  const totalGames = completions.length + daily.length;
+  const regular = regularCompletions(completions);
+  const wins = regular.filter((c) => c.result === 'win');
+  const losses = regular.filter((c) => c.result === 'loss');
+  const totalGames = regular.length + daily.length;
   const winCount = wins.length + daily.length;
 
   let bestWinSeconds: number | null = null;
@@ -96,7 +101,7 @@ export function buildDerivedStats(
   period: StatsPeriod,
   reference = new Date(),
 ) {
-  const filteredCompletions = completions.filter((c) =>
+  const filteredCompletions = regularCompletions(completions).filter((c) =>
     isWithinPeriod(c.completedAt, period, reference),
   );
   const filteredDaily = daily.filter((d) => isWithinPeriod(d.dateKey, period, reference));
@@ -165,7 +170,7 @@ export function buildDifficultyChart(
   const ids = ['easy', 'medium', 'hard', 'expert', 'master'] as const;
   const winsBy: Record<string, number> = Object.fromEntries(ids.map((id) => [id, 0]));
 
-  for (const c of completions) {
+  for (const c of regularCompletions(completions)) {
     if (c.result !== 'win' || !isWithinPeriod(c.completedAt, period, reference)) continue;
     if (c.difficultyId in winsBy) winsBy[c.difficultyId]! += 1;
   }
